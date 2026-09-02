@@ -1,0 +1,13 @@
+diff --git a/package.json b/package.json
+index 224682fb976b343b26fa16beacd832f3a6812a57..ba36c698f50537c590777b178a2f59fc8dd6af44 100644
+--- a/package.json
++++ b/package.json
+@@ -39,7 +39,7 @@
+   "homepage": "https://github.com/xenova/transformers.js#readme",
+   "dependencies": {
+     "onnxruntime-web": "1.14.0",
+-    "sharp": "^0.32.0",
++    "sharp": "0.35.3",
+     "@huggingface/jinja": "^0.2.2"
+   },
+   "optionalDependencies": {

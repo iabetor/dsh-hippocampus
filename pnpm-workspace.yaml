@@ -1,0 +1,30 @@
+# The project is its own pnpm workspace root, so pnpm never walks up into a
+# parent workspace when installing.
+packages:
+  - .
+
+# Unify sharp with the harness main program (0.35.3 → @img/sharp-libvips
+# 1.3.2): @xenova/transformers pins sharp@0.32.0, whose bundled libvips
+# 8.14.2 collides with the harness's 8.18.3 in the same Node process
+# (macOS duplicate GNotificationCenterDelegate warning).
+overrides:
+  sharp: 0.35.3
+
+# Build-script allowlist: onnxruntime-node (embedding inference) and its
+# transitive native deps need their postinstall scripts.
+onlyBuiltDependencies:
+  - onnxruntime-node
+  - protobufjs
+  - sharp
+
+# The upstream dsh packages publish frequently; don't gate installs on
+# release age.
+minimumReleaseAge: 0
+
+allowBuilds:
+  onnxruntime-node: set this to true or false
+  protobufjs: set this to true or false
+  sharp: set this to true or false
+
+patchedDependencies:
+  '@xenova/transformers': patches/@xenova__transformers.patch
