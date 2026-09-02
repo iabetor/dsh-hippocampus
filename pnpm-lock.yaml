@@ -14,6 +14,13 @@ importers:
 
   .:
     dependencies:
+      '@xenova/transformers':
+        specifier: 2.17.2
+        version: 2.17.2(patch_hash=5e5d4eef9e0d2dc9bcc1543654be107bd6750e192eb35a12e04ec0ee5abf1404)(@types/node@24.13.3)
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1
       '@deepseek-ai/dsh-agent':
         specifier: 0.1.2-alpha.2
         version: 0.1.2-alpha.2(e1ae0aee111ccebec0f9d17342d96d6e)
@@ -50,31 +57,24 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.1.2-alpha.2
         version: 0.1.2-alpha.2(6e5c466e50469dec0d4be0873919b970)
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
       '@types/react-dom':
         specifier: ^19.2.5
         version: 19.2.5(@types/react@19.2.18)
-      '@xenova/transformers':
-        specifier: 2.17.2
-        version: 2.17.2(patch_hash=5e5d4eef9e0d2dc9bcc1543654be107bd6750e192eb35a12e04ec0ee5abf1404)(@types/node@24.13.3)
+      lightningcss:
+        specifier: ^1.33.0
+        version: 1.33.0
       react:
         specifier: ^19.2.8
         version: 19.2.8
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.1
-        version: 4.0.1
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      lightningcss:
-        specifier: ^1.33.0
-        version: 1.33.0
       tsdown:
         specifier: ^0.22.14
         version: 0.22.14(typescript@5.6.2)
