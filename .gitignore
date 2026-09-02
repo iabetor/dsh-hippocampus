@@ -1,9 +1,7 @@
 # Dependencies
 node_modules/
 
-# Build output
-lib/
-
+# Build output is committed (GitHub/npm installs need lib/)
 # Test coverage
 coverage/
 
