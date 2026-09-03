@@ -105,7 +105,7 @@ async function trimAudit(path: string): Promise<void> {
   }
 }
 
-/** Read every audit entry, oldest first. */
+/** Read every audit entry, newest first (most recent cleanup on top). */
 export async function readAudit(memoryRoot?: string): Promise<AuditEntry[]> {
   const { readFile } = await import('node:fs/promises')
   try {
@@ -122,7 +122,7 @@ export async function readAudit(memoryRoot?: string): Promise<AuditEntry[]> {
         // Skip malformed lines.
       }
     }
-    return entries
+    return entries.reverse()
   } catch {
     return []
   }
@@ -297,51 +297,130 @@ export function parseReviewVerdict(text: string): string[] {
   }
 }
 
+/** One merge proposal: several records consolidated into one fuller record. */
+export interface MergeProposal {
+  /** Ids of the records to fold together. */
+  readonly ids: readonly string[]
+  /** The merged, fuller text that replaces them. */
+  readonly text: string
+  /** Optional tags for the merged record. */
+  readonly tags?: readonly string[]
+}
+
+/** The model's full review plan: records to delete, groups to merge. */
+export interface ReviewPlan {
+  /** Ids to delete outright (transient / obsolete / trivial). */
+  readonly delete: readonly string[]
+  /** Groups of records to merge into a single fuller record. */
+  readonly merge: readonly MergeProposal[]
+}
+
+/** Parse the model's review plan JSON (`{delete:[], merge:[...]}`). */
+export function parseReviewPlan(text: string): ReviewPlan {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text)
+  const body = fenced?.[1] ?? text
+  const match = /\{[\s\S]*\}/.exec(body)
+  if (match === null) return { delete: [], merge: [] }
+  try {
+    const parsed = JSON.parse(match[0]) as {
+      delete?: unknown
+      merge?: unknown
+    }
+    const del = Array.isArray(parsed.delete)
+      ? parsed.delete.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : []
+    let merge: MergeProposal[] = []
+    if (Array.isArray(parsed.merge)) {
+      merge = parsed.merge
+        .filter((item): item is Record<string, unknown> =>
+          item !== null && typeof item === 'object' && !Array.isArray(item))
+        .map(item => {
+          const ids = Array.isArray(item.ids)
+            ? item.ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+            : []
+          const text = typeof item.text === 'string' ? item.text.trim() : ''
+          const tags = Array.isArray(item.tags)
+            ? item.tags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0)
+            : undefined
+          const proposal: MergeProposal = {
+            ids,
+            text,
+            ...(tags === undefined || tags.length === 0
+              ? {}
+              : { tags: tags as readonly string[] }),
+          }
+          return proposal
+        })
+        .filter((item): item is MergeProposal =>
+          item.ids.length >= 2 && item.text.length > 0)
+    }
+    return { delete: del, merge }
+  } catch {
+    return { delete: [], merge: [] }
+  }
+}
+
 /** The review directive given to the model. */
 const REVIEW_INSTRUCTION = [
-  'You are a memory curator for an AI coding assistant. Below are AUTO-EXTRACTED memory records (id: text) — they were extracted automatically from past conversations, so deleting them is safe and expected when they are not worth keeping.',
+  'You are a memory curator for an AI coding assistant. Below are AUTO-EXTRACTED memory records (id: text) — they were extracted automatically from past conversations, so deleting or merging them is safe and expected.',
   '',
-  'DELETE records matching ANY of these categories:',
+  'Each record is tagged with its location: [user] for host-global facts, [project:<workspace>] for one workspace\'s facts.',
+  '',
+  'DECIDE, per record or per group of records:',
+  '',
+  '1. DELETE records matching ANY of these categories:',
   '- Transient/one-off: "the build showed 3 warnings", "pressed Ctrl+S at 14:32", "checked node version with node -v" — task state, timestamps, one-time events',
   '- Resolved/obsolete: a fix or decision that is already implemented, a superseded plan',
   '- Trivial/vague: fragments that carry no durable meaning on their own',
-  '- Duplicates: the same fact restated; keep the most complete version, delete the rest',
+  '- Exact duplicates of another record that will be kept',
+  '',
+  '2. MERGE records that cover the SAME TOPIC as fragments — several records that together tell one story are consolidated into a single fuller record. Examples:',
+  '- Three records about "the extraction LLM failing after a harness upgrade" (each holding one symptom or one fix) → one record describing the full root cause and resolution',
+  '- Several records describing the same component\'s architecture from different angles → one coherent architecture note',
+  '',
+  'MERGE RULES:',
+  '- Only merge records with the SAME [user] or SAME [project:<workspace>] tag — never across scopes or workspaces',
+  '- Merge only genuinely related records (same theme); do not force unrelated facts together',
+  '- The merged text must be a concise, complete statement that preserves every durable fact from the sources (drop only transient detail)',
   '',
   'KEEP records that capture durable facts: user preferences, project decisions, conventions, architecture, stable identifiers, API/commands worth remembering.',
   '',
-  'Respond with ONLY a JSON array of ids to DELETE, e.g. ["id-1","id-2"]. Respond [] when nothing qualifies.',
+  'Respond with ONLY a JSON object, e.g.:',
+  '{"delete":["id-1","id-2"],"merge":[{"ids":["id-3","id-4"],"text":"The merged fuller fact..."}]}',
+  'Use empty arrays when nothing qualifies: {"delete":[],"merge":[]}',
   '',
 ].join('\n')
 
-/**
- * LLM review layer: ask the routed model which auto-extracted records are
- * duplicates/stale/trivial, delete them, and append an audit entry.
- * @returns the deleted records (id, scope, text) for auditing.
- */
-export async function runLlmReview(
-  ctx: Context,
-  store: MemoryStore,
-  workspaces: readonly { readonly path: string }[],
-  memoryRoot?: string,
-  signal?: AbortSignal,
-): Promise<Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }>> {
-  const candidates = await collectAutoExtracted(store, workspaces)
-  if (candidates.length === 0) return []
+/** Maximum records offered to the model in one review request. Reasoning
+ * models think per-record; a single giant batch (23 records) took ~145s and
+ * blew the timeout. Smaller batches keep each request well inside budget. */
+const REVIEW_BATCH_SIZE = 8
 
-  // Route through the default model selection (same as webhook sessions).
-  const apiCtx = ctx as unknown as {
-    agentDefaultModel: { currentSelection(): { provider: string; model: string } }
-    llm: { stream(options: GenerateOptions): AsyncIterable<unknown> }
-  }
+/** One candidate location key: scope + workspace (merge only within one). */
+function locationKey(candidate: ReviewCandidate): string {
+  return candidate.record.scope === 'user' ? 'user' : `project:${candidate.workspace ?? ''}`
+}
+
+/** Ask the model for one batch's review plan; never throws (returns empty). */
+async function reviewBatch(
+  apiCtx: { agentDefaultModel: { currentSelection(): { provider: string; model: string } }; llm: { stream(options: GenerateOptions): AsyncIterable<unknown> } },
+  batch: readonly ReviewCandidate[],
+  signal?: AbortSignal,
+): Promise<ReviewPlan> {
   const selection = apiCtx.agentDefaultModel?.currentSelection()
   if (selection === undefined || selection.provider.length === 0 || selection.model.length === 0) {
-    return []
+    return { delete: [], merge: [] }
   }
   const llm = apiCtx.llm
-  if (llm === undefined) return []
+  if (llm === undefined) return { delete: [], merge: [] }
 
-  const listing = candidates
-    .map(candidate => `${candidate.record.id}: ${candidate.record.text}`)
+  const listing = batch
+    .map(candidate => {
+      const location = candidate.record.scope === 'user'
+        ? '[user]'
+        : `[project:${candidate.workspace ?? '?'}]`
+      return `${candidate.record.id} ${location}: ${candidate.record.text}`
+    })
     .join('\n')
   const messages: Message[] = [
     {
@@ -354,11 +433,17 @@ export async function runLlmReview(
     provider: selection.provider,
     model: selection.model,
     messages,
-    maxTokens: 2048,
+    // Leave maxTokens unset: the routed model is often a reasoning model
+    // whose thinking (reasoning_content) alone can exceed a fixed budget —
+    // a hard cap truncated the thinking before any content was produced, so
+    // the review returned [] and cleaned nothing. Let the llm service apply
+    // the model's own default output cap instead.
     ...signal === undefined ? {} : { signal },
   }
   const controller = new AbortController()
-  const timer = setTimeout(() => { controller.abort() }, 30_000)
+  // Reasoning models spend tokens (and wall-clock) thinking before answering.
+  // Per-batch budget: 90s covers a batch of ~8 with margin.
+  const timer = setTimeout(() => { controller.abort() }, 90_000)
   const fused = signal !== undefined ? AbortSignal.any([signal, controller.signal]) : controller.signal
   let text = ''
   try {
@@ -371,17 +456,64 @@ export async function runLlmReview(
       .map(block => block.text)
       .join('')
   } catch {
-    return []
+    return { delete: [], merge: [] }
   } finally {
     clearTimeout(timer)
   }
+  return parseReviewPlan(text)
+}
 
-  const deleteIds = new Set(parseReviewVerdict(text))
-  if (deleteIds.size === 0) return []
+/** Apply one batch's plan: merges first, then deletes. Returns the outcomes. */
+async function applyPlan(
+  store: MemoryStore,
+  candidates: readonly ReviewCandidate[],
+  plan: ReviewPlan,
+  memoryRoot: string | undefined,
+): Promise<Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }>> {
+  const byId = new Map(candidates.map(candidate => [candidate.record.id, candidate]))
 
+  // ---- Merges first: consolidate related fragments into one fuller record.
+  const mergedIds = new Set<string>()
+  const mergedOutcome: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
+  for (const proposal of plan.merge) {
+    const members = proposal.ids
+      .map(id => byId.get(id))
+      .filter((member): member is ReviewCandidate => member !== undefined)
+    // Safety: drop proposals that reference unknown ids, or span multiple
+    // scopes/workspaces, or merge a single record into itself.
+    if (members.length < 2) continue
+    const firstScope = members[0]!.record.scope
+    const firstWorkspace = members[0]!.workspace
+    const uniform = members.every(member =>
+      member.record.scope === firstScope && member.workspace === firstWorkspace)
+    if (!uniform) continue
+    // All members must still exist (a prior merge may have consumed one).
+    if (members.some(member => mergedIds.has(member.record.id))) continue
+
+    const created = await store.create(firstScope, {
+      text: proposal.text,
+      ...(proposal.tags === undefined || proposal.tags.length === 0
+        ? {}
+        : { tags: [...proposal.tags] }),
+    }, { kind: 'auto' }, firstWorkspace)
+    for (const member of members) {
+      mergedIds.add(member.record.id)
+      await store.delete(member.record.id, member.workspace)
+    }
+    mergedOutcome.push({
+      id: created.id,
+      scope: firstScope,
+      ...firstWorkspace === undefined ? {} : { workspace: firstWorkspace },
+      text: `${proposal.text} [merged from: ${members.map(m => m.record.id).join(', ')}]`.slice(0, 120),
+    })
+  }
+
+  // ---- Deletes: drop transient/obsolete/trivial records, excluding any id
+  // already consumed by a merge.
   const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
   for (const candidate of candidates) {
-    if (!deleteIds.has(candidate.record.id)) continue
+    if (mergedIds.has(candidate.record.id)) continue
+    if (!plan.delete.includes(candidate.record.id)) continue
     const deleted = await store.delete(candidate.record.id, candidate.workspace)
     if (deleted) {
       removed.push({
@@ -392,6 +524,7 @@ export async function runLlmReview(
       })
     }
   }
+
   if (removed.length > 0) {
     await appendAudit({
       time: Date.now(),
@@ -400,5 +533,63 @@ export async function runLlmReview(
       removed,
     }, memoryRoot)
   }
-  return removed
+  if (mergedOutcome.length > 0) {
+    await appendAudit({
+      time: Date.now(),
+      layer: 'llm',
+      reason: 'model review: merged related auto-extracted records',
+      removed: mergedOutcome,
+    }, memoryRoot)
+  }
+  return [...removed, ...mergedOutcome]
+}
+
+/**
+ * LLM review layer: ask the routed model which auto-extracted records are
+ * duplicates/stale/trivial (delete) or same-topic fragments (merge). Runs in
+ * small per-location batches so each request stays inside the reasoning
+ * model's budget, and one failing batch never blanks the whole review.
+ * @returns every affected record (deleted or merged-into) for auditing.
+ */
+export async function runLlmReview(
+  ctx: Context,
+  store: MemoryStore,
+  workspaces: readonly { readonly path: string }[],
+  memoryRoot?: string,
+  signal?: AbortSignal,
+): Promise<Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }>> {
+  const candidates = await collectAutoExtracted(store, workspaces)
+  if (candidates.length === 0) return []
+
+  const apiCtx = ctx as unknown as {
+    agentDefaultModel: { currentSelection(): { provider: string; model: string } }
+    llm: { stream(options: GenerateOptions): AsyncIterable<unknown> }
+  }
+
+  // Group by location (merge constraint: same scope AND workspace), then
+  // slice each location into REVIEW_BATCH_SIZE chunks. Batches run serially
+  // (the model route may rate-limit parallel reasoning calls).
+  const byLocation = new Map<string, ReviewCandidate[]>()
+  for (const candidate of candidates) {
+    const key = locationKey(candidate)
+    const list = byLocation.get(key) ?? []
+    list.push(candidate)
+    byLocation.set(key, list)
+  }
+  const batches: ReviewCandidate[][] = []
+  for (const list of byLocation.values()) {
+    for (let index = 0; index < list.length; index += REVIEW_BATCH_SIZE) {
+      batches.push(list.slice(index, index + REVIEW_BATCH_SIZE))
+    }
+  }
+
+  const outcome: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
+  for (const batch of batches) {
+    // Fail-soft per batch: a model error or malformed reply yields an empty
+    // plan and that batch is simply skipped, never aborting the whole review.
+    const plan = await reviewBatch(apiCtx, batch, signal)
+    if (plan.delete.length === 0 && plan.merge.length === 0) continue
+    outcome.push(...await applyPlan(store, batch, plan, memoryRoot))
+  }
+  return outcome
 }

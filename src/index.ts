@@ -30,17 +30,20 @@ export const name = 'dsh-hippocampus'
 export const inject = ['sessions', 'tools', 'systemPrompt', 'llm']
 
 const DEFAULT_MAX_USER_RECORDS = 200
-const DEFAULT_MAX_TOKENS = 512
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_FACTS_PER_TURN = 5
 
 /** Resolve and validate plugin configuration. */
 export function resolveConfig(config: HippocampusConfig = {}): Required<Pick<
   HippocampusConfig,
-  'autoExtract' | 'autoInject' | 'semanticRanking' | 'keywordWeight' | 'embeddingModel' | 'maxUserRecords' | 'maxTokens' | 'timeoutMs'
->> & { maxFactsPerTurn: number; extractionProvider?: string; extractionModel?: string } {
+  'autoExtract' | 'autoInject' | 'semanticRanking' | 'keywordWeight' | 'embeddingModel' | 'maxUserRecords' | 'timeoutMs'
+>> & { maxTokens?: number; maxFactsPerTurn: number; extractionProvider?: string; extractionModel?: string } {
   const maxUserRecords = config.maxUserRecords ?? DEFAULT_MAX_USER_RECORDS
-  const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS
+  // Undefined means "use the routed model's own default output cap": the llm
+  // service fills config.maxTokens from the model's advertised default when
+  // the caller leaves it unset. A fixed default (512) truncated verbose
+  // turn summaries and silently killed auto-extraction, so no hard default.
+  const maxTokens = config.maxTokens
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const keywordWeight = config.keywordWeight ?? 0.4
   if (keywordWeight < 0 || keywordWeight > 1 || !Number.isFinite(keywordWeight)) {
@@ -49,8 +52,8 @@ export function resolveConfig(config: HippocampusConfig = {}): Required<Pick<
   if (!Number.isSafeInteger(maxUserRecords) || maxUserRecords < 1) {
     throw new TypeError('hippocampus: maxUserRecords must be a positive safe integer')
   }
-  if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
-    throw new TypeError('hippocampus: maxTokens must be a positive safe integer')
+  if (maxTokens !== undefined && (!Number.isSafeInteger(maxTokens) || maxTokens < 1)) {
+    throw new TypeError('hippocampus: maxTokens must be a positive safe integer when set')
   }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
     throw new TypeError('hippocampus: timeoutMs must be a positive safe integer')
@@ -62,9 +65,9 @@ export function resolveConfig(config: HippocampusConfig = {}): Required<Pick<
     keywordWeight,
     embeddingModel: config.embeddingModel ?? DEFAULT_EMBEDDING_MODEL,
     maxUserRecords,
-    maxTokens,
     timeoutMs,
     maxFactsPerTurn: DEFAULT_MAX_FACTS_PER_TURN,
+    ...maxTokens === undefined ? {} : { maxTokens },
     ...config.extractionProvider === undefined ? {} : { extractionProvider: config.extractionProvider },
     ...config.extractionModel === undefined ? {} : { extractionModel: config.extractionModel },
   }

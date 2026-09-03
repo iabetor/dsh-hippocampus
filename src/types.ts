@@ -109,7 +109,8 @@ export interface HippocampusConfig {
   readonly embeddingModel?: string
   /** User-layer record cap; LRU eviction beyond it. Defaults to 200. */
   readonly maxUserRecords?: number
-  /** Extraction output token cap. Defaults to 512. */
+  /** Extraction output token cap; unset (default) uses the routed model's own
+   * default output limit instead of a fixed budget. */
   readonly maxTokens?: number
   /** Extraction cooperative deadline in ms. Defaults to 30000. */
   readonly timeoutMs?: number

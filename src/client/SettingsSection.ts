@@ -79,6 +79,7 @@ export function SettingsSection({ sessionId, workspace, t }: SettingsSectionInje
   const [searchResults, setSearchResults] = useState<MemoryRecordView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [maintaining, setMaintaining] = useState(false)
+  const [maintainStarted, setMaintainStarted] = useState(false)
   const [showAudit, setShowAudit] = useState(false)
   const [audit, setAudit] = useState<MemoryAuditEntry[] | null>(null)
 
@@ -114,15 +115,23 @@ export function SettingsSection({ sessionId, workspace, t }: SettingsSectionInje
     setMaintaining(true)
     setError(null)
     try {
+      // The host accepts the job and finishes it in the background (batched
+      // LLM review); completion arrives as a toast via the SSE channel, not
+      // as this call's response. So this resolves fast.
       const result = await runMaintenance(sessionId)
-      setAudit(result.audit)
-      await load('')
+      if (result.accepted) {
+        setMaintainStarted(true)
+        globalThis.setTimeout(() => { setMaintainStarted(false) }, 6000)
+      } else {
+        // A job is already running; surface that instead of a second run.
+        setError(t('settings.maintainBusy'))
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('settings.maintainFailed'))
     } finally {
       setMaintaining(false)
     }
-  }, [maintaining, sessionId, load, t])
+  }, [maintaining, sessionId, t])
 
   const onRestore = useCallback(async (id: string) => {
     setError(null)
@@ -179,6 +188,7 @@ export function SettingsSection({ sessionId, workspace, t }: SettingsSectionInje
         }, showAudit ? t('settings.hideAudit') : t('settings.showAudit')),
       ),
     ),
+    maintainStarted && h('div', { className: css.maintainStarted }, t('settings.maintainStarted')),
     showAudit && audit !== null && h('div', { className: css.auditPanel },
       audit.length === 0
         ? h('div', { className: css.settingsHint }, t('settings.auditEmpty'))

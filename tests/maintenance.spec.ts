@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MemoryStore } from '../src/store.ts'
 import {
-  AUDIT_MAX_ENTRIES, appendAudit, auditManualDelete, parseReviewVerdict,
-  readAudit, restoreFromAudit, runRuleSweep, sweepStale,
+  AUDIT_MAX_ENTRIES, appendAudit, auditManualDelete, parseReviewPlan,
+  parseReviewVerdict, readAudit, restoreFromAudit, runRuleSweep, sweepStale,
 } from '../src/maintenance.ts'
 
 const roots: string[] = []
@@ -84,9 +84,9 @@ describe('audit log trimming', () => {
     }
     const audit = await readAudit(userRoot)
     expect(audit).toHaveLength(AUDIT_MAX_ENTRIES)
-    // The newest entries (highest time) are kept.
-    expect(audit[0]?.time).toBe(10)
-    expect(audit[AUDIT_MAX_ENTRIES - 1]?.time).toBe(AUDIT_MAX_ENTRIES + 9)
+    // readAudit returns newest first, so the highest time leads.
+    expect(audit[0]?.time).toBe(AUDIT_MAX_ENTRIES + 9)
+    expect(audit[AUDIT_MAX_ENTRIES - 1]?.time).toBe(10)
   })
 })
 
@@ -103,6 +103,27 @@ describe('parseReviewVerdict', () => {
 
   it('ignores malformed output', () => {
     expect(parseReviewVerdict('not json at all')).toEqual([])
+  })
+})
+
+describe('parseReviewPlan', () => {
+  it('parses delete ids and merge groups from the review plan JSON', () => {
+    const plan = parseReviewPlan('Here is my plan:\n```json\n{"delete":["d1","d2"],"merge":[{"ids":["m1","m2"],"text":"Merged fact","tags":["a","b"]}]}\n```')
+    expect(plan.delete).toEqual(['d1', 'd2'])
+    expect(plan.merge).toHaveLength(1)
+    expect(plan.merge[0]?.ids).toEqual(['m1', 'm2'])
+    expect(plan.merge[0]?.text).toBe('Merged fact')
+    expect(plan.merge[0]?.tags).toEqual(['a', 'b'])
+  })
+
+  it('drops merge groups with too few ids or empty text', () => {
+    const plan = parseReviewPlan('{"delete":[],"merge":[{"ids":["only-one"],"text":"x"},{"ids":["a","b"],"text":""}]}')
+    expect(plan.delete).toEqual([])
+    expect(plan.merge).toEqual([])
+  })
+
+  it('returns an empty plan for malformed output', () => {
+    expect(parseReviewPlan('not json at all')).toEqual({ delete: [], merge: [] })
   })
 })
 

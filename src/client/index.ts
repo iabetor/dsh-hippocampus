@@ -10,6 +10,8 @@ import { SessionPanel, type SessionPanelInjected } from './SessionPanel.ts'
 import { SettingsSection, type SettingsSectionInjected } from './SettingsSection.ts'
 import { registerSettingsNavIcon } from './settings-nav-icon.ts'
 import { resolveCurrentWorkspace, type ClientSessionsFace, type ClientWorkspacesFace } from './current-workspace.ts'
+import { setToastLabels, startMaintainEvents } from './toast.ts'
+import { ToastHost, type ToastHostProps } from './ToastHost.ts'
 
 /** Structural face of the client services this plugin consumes. */
 export interface HippocampusClientContext extends Context {
@@ -35,6 +37,28 @@ export function apply(rawCtx: Context): void {
   // The settings shell paints every unknown section with the gear glyph and
   // offers no icon override; patch the rendered nav DOM instead (see module).
   registerSettingsNavIcon()
+
+  // Toast labels + SSE listener: background "整理" jobs push completion over
+  // /memory/api/events; the shell.overlay host below renders the toasts.
+  setToastLabels({
+    doneTitle: t('toast.doneTitle'),
+    errorTitle: t('toast.errorTitle'),
+    doneDetail: (count: number) => t('toast.doneDetail', { count }),
+  })
+  startMaintainEvents()
+
+  // Frame-wide toast layer: ui-layout's shell.overlay slot renders this at
+  // the app level (independent of any conversation or settings panel), so a
+  // finished background job notifies the user wherever they are.
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register(
+    {
+      name: 'shell.overlay',
+      id: 'hippocampus-toast',
+      order: 90,
+      locale: NS as never,
+    },
+    (props: ToastHostProps) => h(ToastHost, props),
+  ))
 
   // Conversation view tab: per-session memory (project + user).
   ctx.slots.inject('conversation.view', () => ctx.slots.register(

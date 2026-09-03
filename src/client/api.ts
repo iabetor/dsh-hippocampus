@@ -126,8 +126,9 @@ export interface MemoryAuditEntry {
   }[]
 }
 
-/** Run maintenance manually (settings button); returns removed count + audit. */
-export function runMaintenance(sessionId: string): Promise<{ removed: number; audit: MemoryAuditEntry[] }> {
+/** Run maintenance manually (settings button). accepted:false means a job
+ * is already running (the host refuses concurrent reviews). */
+export function runMaintenance(sessionId: string): Promise<{ accepted: boolean; taskId?: string; reason?: string }> {
   return call('maintain', { sessionId })
 }
 

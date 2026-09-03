@@ -174,6 +174,58 @@ async function workspaceOf(
 export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, memoryRoot?: string): void {
   const trustedHosts = () => ctx.webRuntime.trustedHosts
 
+  // ---- Background maintain jobs + SSE completion broadcast.
+  // The "整理" button used to block the settings page for up to 90s+ while
+  // the LLM review ran; it now returns immediately and the host finishes the
+  // work in the background, then pushes a completion event to any browser
+  // listening on /memory/api/events (an SSE stream, mirroring the harness
+  // HMR plugin's event channel — no harness changes needed).
+  const sseClients = new Set<ServerResponse>()
+  const broadcast = (payload: unknown): void => {
+    const line = `data: ${JSON.stringify(payload)}\n\n`
+    for (const client of sseClients) {
+      try { client.write(line) } catch { /* client gone */ }
+    }
+  }
+  // Concurrency guard: one background maintain at a time. A second "整理"
+  // click while one is running is refused (accepted:false) instead of
+  // launching a duplicate review over the same records.
+  let maintainRunning = false
+  const runBackgroundMaintain = async (taskId: string): Promise<void> => {
+    try {
+      broadcast({ type: 'maintain/start', taskId })
+      const registry = ctx.workspaceRegistry?.list() ?? []
+      // Snapshot the audit tail before the run so the completion event can
+      // carry exactly the entries this job appended (rule + LLM layers).
+      const before = await readAudit(memoryRoot)
+      const beforeCount = before.length
+      const ruleRemoved = await runRuleSweep(store, registry, memoryRoot)
+      const llmAffected = await runLlmReview(ctx, store, registry, memoryRoot)
+      const after = await readAudit(memoryRoot)
+      const freshAudit = after.slice(0, Math.max(0, after.length - beforeCount))
+      broadcast({
+        type: 'maintain/done',
+        taskId,
+        removed: ruleRemoved + llmAffected.length,
+        audit: freshAudit,
+      })
+    } catch (error) {
+      broadcast({
+        type: 'maintain/error',
+        taskId,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      maintainRunning = false
+    }
+  }
+  const startMaintain = (taskId: string): boolean => {
+    if (maintainRunning) return false
+    maintainRunning = true
+    void runBackgroundMaintain(taskId)
+    return true
+  }
+
   const route: WebRoute = {
     kind: 'prefix',
     path: '/memory/api',
@@ -317,19 +369,21 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
             return
           }
           case 'maintain': {
-            // Manual maintenance trigger (settings panel button): run the
-            // rule sweep, then the LLM review, and return the fresh audit.
-            const registry = ctx.workspaceRegistry?.list() ?? []
-            const ruleRemoved = await runRuleSweep(store, registry, memoryRoot)
-            const llmRemoved = await runLlmReview(ctx, store, registry, memoryRoot)
-            const audit = await readAudit(memoryRoot)
-            writeOk(res, { removed: ruleRemoved + llmRemoved.length, audit: audit.slice(-50) })
+            // Manual maintenance trigger (settings panel button). Returns
+            // immediately with a task id; the rule sweep + batched LLM
+            // review run in the background (see runBackgroundMaintain) and
+            // the result is pushed over /memory/api/events. A second click
+            // while one job is running is refused (accepted:false) so two
+            // reviews never race over the same records.
+            const taskId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+            const started = startMaintain(taskId)
+            writeOk(res, started ? { accepted: true, taskId } : { accepted: false, reason: 'already-running' })
             return
           }
           case 'audit': {
             // Read the maintenance audit trail (what was cleaned and why).
             const audit = await readAudit(memoryRoot)
-            writeOk(res, { audit: audit.slice(-100) })
+            writeOk(res, { audit: audit.slice(0, 100) })
             return
           }
           default:
@@ -341,6 +395,32 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
     },
   }
   ctx.webServer.register(route)
+
+  // SSE completion channel: a browser opens this once and receives
+  // maintain/done (or maintain/error) events as background jobs finish.
+  // Exact paths win over the /memory/api prefix (see WebServer.match).
+  const eventsRoute: WebRoute = {
+    kind: 'exact',
+    path: '/memory/api/events',
+    handler: (req: IncomingMessage, res: ServerResponse) => {
+      if (!isTrustedRequest(req, trustedHosts())) {
+        writeError(res, new MemoryApiError('forbidden', 'request rejected by the memory trust fence', 403))
+        return
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      })
+      // Initial heartbeat frame establishes the stream; some proxies buffer
+      // until the first write.
+      res.write(': connected\n\n')
+      sseClients.add(res)
+      res.on('close', () => { sseClients.delete(res) })
+      res.on('error', () => { sseClients.delete(res) })
+    },
+  }
+  ctx.webServer.register(eventsRoute)
 }
 
 /** Compact record view for the browser. */
