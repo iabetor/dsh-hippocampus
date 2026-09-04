@@ -191,29 +191,98 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
   // click while one is running is refused (accepted:false) instead of
   // launching a duplicate review over the same records.
   let maintainRunning = false
+  /** Thalamus integration (optional): notify when the service is mounted. */
+  const notifyThalamus = async (payload: {
+    kind: 'success' | 'error' | 'info'
+    title: string
+    detail: string
+    previewText: string
+  }): Promise<void> => {
+    const service = ctx.get?.('notifications') as {
+      push(input: unknown): Promise<unknown>
+    } | undefined
+    if (service === undefined) return
+    try {
+      await service.push({
+        source: 'hippocampus',
+        kind: payload.kind,
+        title: payload.title,
+        detail: payload.detail,
+        preview: {
+          name: 'memory-maintain.md',
+          text: payload.previewText,
+          language: 'md',
+        },
+      })
+    } catch {
+      // Thalamus is best-effort: a failure never breaks maintain.
+    }
+  }
+  /** Render the fresh audit entries as a markdown preview body. */
+  const auditPreview = (audit: unknown): string => {
+    if (!Array.isArray(audit) || audit.length === 0) return '（本次无清理记录）'
+    const lines: string[] = ['## 本次清理记录', '']
+    for (const entry of audit) {
+      const e = entry as { time?: unknown; layer?: unknown; reason?: unknown; removed?: unknown }
+      if (e === null || typeof e !== 'object') continue
+      const when = typeof e.time === 'number'
+        ? new Date(e.time).toLocaleString()
+        : ''
+      lines.push(`### ${when} · ${String(e.layer ?? '')}`)
+      if (typeof e.reason === 'string') lines.push(`> ${e.reason}`)
+      lines.push('')
+      if (Array.isArray(e.removed)) {
+        for (const item of e.removed) {
+          const r = item as { scope?: unknown; text?: unknown }
+          if (r === null || typeof r !== 'object') continue
+          const scope = r.scope === 'user' ? '全局' : '项目'
+          const text = typeof r.text === 'string' ? r.text : ''
+          lines.push(`- [${scope}] ${text}`)
+        }
+      }
+      lines.push('')
+    }
+    return lines.join('\n')
+  }
   const runBackgroundMaintain = async (taskId: string): Promise<void> => {
     try {
       broadcast({ type: 'maintain/start', taskId })
       const registry = ctx.workspaceRegistry?.list() ?? []
-      // Snapshot the audit tail before the run so the completion event can
-      // carry exactly the entries this job appended (rule + LLM layers).
+      // Snapshot the newest audit time before the run so the completion event
+      // can carry exactly the entries this job appended (rule + LLM layers).
+      // A count delta would break once the audit log is trimmed at its cap:
+      // appended entries evict older ones, so the length no longer grows.
       const before = await readAudit(memoryRoot)
-      const beforeCount = before.length
+      const beforeNewest = before[0]?.time ?? 0
       const ruleRemoved = await runRuleSweep(store, registry, memoryRoot)
       const llmAffected = await runLlmReview(ctx, store, registry, memoryRoot)
       const after = await readAudit(memoryRoot)
-      const freshAudit = after.slice(0, Math.max(0, after.length - beforeCount))
+      const freshAudit = after.filter(entry => entry.time > beforeNewest)
+      const removed = ruleRemoved + llmAffected.length
       broadcast({
         type: 'maintain/done',
         taskId,
-        removed: ruleRemoved + llmAffected.length,
+        removed,
         audit: freshAudit,
       })
+      await notifyThalamus({
+        kind: removed > 0 ? 'success' : 'info',
+        title: removed > 0 ? '记忆整理完成' : '记忆整理完成（无需清理）',
+        detail: removed > 0 ? `清理 ${removed} 条记录` : '未发现需要清理的记录',
+        previewText: auditPreview(freshAudit),
+      })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       broadcast({
         type: 'maintain/error',
         taskId,
-        message: error instanceof Error ? error.message : String(error),
+        message,
+      })
+      await notifyThalamus({
+        kind: 'error',
+        title: '记忆整理失败',
+        detail: message,
+        previewText: `## 记忆整理失败\n\n${message}`,
       })
     } finally {
       maintainRunning = false
