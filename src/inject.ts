@@ -3,8 +3,14 @@
  * relevant memory for the step's user text and inject the hits as a
  * plugin-sourced user message.
  *
+ * The injected message is a `notice` (one-time account of what happened,
+ * supersedes nothing) — the memory hits for this step are a fresh retrieval,
+ * not a replaceable state snapshot. A snapshot form would be wrong here: it
+ * means "current state; a later snapshot from the same producer supersedes
+ * this one", which per-step memory recalls are not.
+ *
  * Listens on the `agent/pre-step` waterfall: `await next()` first (so the
- * step proceeds normally), then appends a compact memory snapshot when the
+ * step proceeds normally), then appends a compact memory notice when the
  * step's claimed user messages contain searchable text. Deduplicated per
  * session by the query digest, so the same query is not re-injected.
  */
@@ -107,9 +113,9 @@ export function registerAutoInject(
           bytes += line.length
         }
         if (truncated.length === 0) return decision
-        return appendMemorySnapshot(decision, truncated.join('\n'))
+        return appendMemoryNotice(decision, truncated.join('\n'))
       }
-      return appendMemorySnapshot(decision, text)
+      return appendMemoryNotice(decision, text)
     } catch {
       // Injection is best-effort: a recall failure never blocks the step.
       return decision
@@ -117,24 +123,23 @@ export function registerAutoInject(
   })
 }
 
-/** Append the memory snapshot as a plugin-sourced user message. */
-function appendMemorySnapshot(
+/** Append the memory notice as a plugin-sourced user message. */
+function appendMemoryNotice(
   decision: Extract<PreStepDecision, { kind: 'enter' }>,
   text: string,
 ): PreStepDecision {
-  const snapshot = createUserMessage({
-    content: [{ type: 'text', text: [
-      '<system-reminder>',
-      'Relevant memory from previous sessions:',
-      text,
-      'Use these facts when they apply; do not treat them as the user\'s current message.',
-      '</system-reminder>',
-    ].join('\n') }],
+  const hitCount = (text.match(/^\[(?:project|user)\]/gm) ?? []).length
+  const notice = createUserMessage({
+    content: [{
+      type: 'text',
+      text: `Relevant memory from previous sessions:\n${text}`,
+    }],
     source: {
       kind: 'plugin',
       plugin: 'dsh-hippocampus',
-      form: 'snapshot',
-    } as never,
+      form: 'notice',
+      summary: `记忆检索 · ${hitCount} 条相关事实`,
+    },
   })
-  return { ...decision, messages: [...decision.messages, snapshot] }
+  return { ...decision, messages: [...decision.messages, notice] }
 }

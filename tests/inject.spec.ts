@@ -85,6 +85,17 @@ describe('registerAutoInject', () => {
     expect(injected).toHaveLength(1)
     const text = injected[0]!.content.map(b => b.type === 'text' ? b.text : '').join('')
     expect(text).toContain('pnpm')
+    // The injected message is a one-time notice (not replaceable state): it
+    // must declare form 'notice' with a summary and no sections/snapshot.
+    const source = injected[0]!.source as {
+      form?: string
+      summary?: string
+      sections?: unknown
+    }
+    expect(source.form).toBe('notice')
+    expect(typeof source.summary).toBe('string')
+    expect(source.summary!.length).toBeGreaterThan(0)
+    expect(source.sections).toBeUndefined()
   })
 
   it('does not inject when recall finds nothing', async () => {
