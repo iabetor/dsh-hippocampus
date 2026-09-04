@@ -13,6 +13,13 @@ import type { MemoryScope } from './types.ts'
 import type { MemoryStore } from './store.ts'
 import { runRuleSweep, runLlmReview, readAudit, auditManualDelete, restoreFromAudit, removeAuditRecord } from './maintenance.ts'
 
+// Extend the harness job-kind union with the memory-maintenance producer.
+declare module '@deepseek-ai/dsh-jobs' {
+  interface JobKindMap {
+    'hippocampus-maintain': 'hippocampus-maintain'
+  }
+}
+
 /** Body size bound of one JSON request. */
 const MAX_BODY_BYTES = 1 << 20
 
@@ -132,6 +139,8 @@ export type MemoryApiContext = import('@deepseek-ai/cordis').Context & {
   agentDefaultModel: { currentSelection(): { provider: string; model: string } }
   /** LLM service for the manual LLM review (web profiles). */
   llm: { stream(options: import('@deepseek-ai/dsh-llm').GenerateOptions): AsyncIterable<unknown> }
+  /** Background job registry (host provides jobs-local); makes maintain visible in ui-jobs. */
+  jobs?: import('@deepseek-ai/dsh-jobs').JobRegistry
 }
 
 /** Parse a scope argument; undefined when absent or invalid. */
@@ -191,9 +200,14 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
   // click while one is running is refused (accepted:false) instead of
   // launching a duplicate review over the same records.
   let maintainRunning = false
-  const runBackgroundMaintain = async (taskId: string): Promise<void> => {
+  /** Run the maintain work; returns its outcome for the job + SSE broadcast. */
+  const runBackgroundMaintain = async (): Promise<{
+    status: 'completed' | 'failed'
+    detail?: string
+    removed: number
+    audit: unknown
+  }> => {
     try {
-      broadcast({ type: 'maintain/start', taskId })
       const registry = ctx.workspaceRegistry?.list() ?? []
       // Snapshot the audit tail before the run so the completion event can
       // carry exactly the entries this job appended (rule + LLM layers).
@@ -203,27 +217,92 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
       const llmAffected = await runLlmReview(ctx, store, registry, memoryRoot)
       const after = await readAudit(memoryRoot)
       const freshAudit = after.slice(0, Math.max(0, after.length - beforeCount))
-      broadcast({
-        type: 'maintain/done',
-        taskId,
+      return {
+        status: 'completed',
         removed: ruleRemoved + llmAffected.length,
         audit: freshAudit,
-      })
+      }
     } catch (error) {
-      broadcast({
+      return {
+        status: 'failed',
+        detail: error instanceof Error ? error.message : String(error),
+        removed: 0,
+        audit: [],
+      }
+    }
+  }
+  /** Broadcast one completion/error event over the SSE channel. */
+  const broadcastOutcome = (taskId: string, result: {
+    status: 'completed' | 'failed'
+    detail?: string
+    removed: number
+    audit: unknown
+  }): void => {
+    broadcast(result.status === 'completed'
+      ? {
+        type: 'maintain/done',
+        taskId,
+        removed: result.removed,
+        audit: result.audit,
+      }
+      : {
         type: 'maintain/error',
         taskId,
-        message: error instanceof Error ? error.message : String(error),
+        message: result.detail,
       })
-    } finally {
-      maintainRunning = false
-    }
   }
   const startMaintain = (taskId: string): boolean => {
     if (maintainRunning) return false
     maintainRunning = true
-    void runBackgroundMaintain(taskId)
-    return true
+    broadcast({ type: 'maintain/start', taskId })
+
+    // Register as an unowned background job so the task shows up in the
+    // harness ui-jobs surface (session-header job list) while running and
+    // after settling. The job's done promise settles with the outcome; the
+    // SSE broadcast still fires for the settings-panel toast. When the jobs
+    // registry is absent (headless) or refuses the unowned start, fall back
+    // to the plain background run.
+    const jobs = ctx.jobs
+    const launchPlain = (): void => {
+      void runBackgroundMaintain().then(result => {
+        broadcastOutcome(taskId, result)
+      }).finally(() => { maintainRunning = false })
+    }
+    if (jobs === undefined) {
+      launchPlain()
+      return true
+    }
+    try {
+      jobs.start({
+        kind: 'hippocampus-maintain',
+        label: '记忆整理',
+        run: () => {
+          let settle!: (outcome: { status: 'completed' | 'killed' | 'failed'; detail?: string; output?: string }) => void
+          const done = new Promise<{ status: 'completed' | 'killed' | 'failed'; detail?: string; output?: string }>((resolve) => {
+            settle = resolve
+          })
+          void runBackgroundMaintain().then(result => {
+            settle({
+              status: result.status,
+              detail: result.status === 'completed'
+                ? `清理 ${result.removed} 条`
+                : result.detail,
+              output: result.status === 'completed' ? `清理 ${result.removed} 条` : undefined,
+            })
+            broadcastOutcome(taskId, result)
+          }).finally(() => { maintainRunning = false })
+          return {
+            cancel: (reason?: string) => { settle({ status: 'killed', detail: reason }) },
+            done,
+          }
+        },
+      })
+      return true
+    } catch {
+      // jobs present but refuses the start (no controller): plain run.
+      launchPlain()
+      return true
+    }
   }
 
   const route: WebRoute = {

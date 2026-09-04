@@ -122,7 +122,7 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
   // (canonical-cwd index); sessionPersistence covers subagent children and
   // restored sessions the registry never accounted. agentDefaultModel + llm
   // back the manual "tidy" LLM review (present in web profiles).
-  ctx.inject(['webServer', 'webRuntime', 'workspaceRegistry', 'sessionPersistence', 'agentDefaultModel', 'llm'], (apiCtx) => {
+  ctx.inject(['webServer', 'webRuntime', 'workspaceRegistry', 'sessionPersistence', 'agentDefaultModel', 'llm', 'jobs'], (apiCtx) => {
     registerMemoryApi(apiCtx as MemoryApiContext, store, config.memoryRoot)
   })
 
