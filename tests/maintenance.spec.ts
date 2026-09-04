@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MemoryStore } from '../src/store.ts'
 import {
-  AUDIT_MAX_ENTRIES, appendAudit, auditManualDelete, parseReviewPlan,
+  AUDIT_MAX_ENTRIES, appendAudit, auditManualDelete, collectAutoExtracted, parseReviewPlan,
   parseReviewVerdict, readAudit, restoreFromAudit, runRuleSweep, sweepStale,
 } from '../src/maintenance.ts'
 
@@ -153,5 +153,36 @@ describe('audit restore', () => {
     const record = await store.create('project', { text: 'existing fact' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
     const item = { id: record.id, scope: record.scope as 'project', workspace, text: 'existing fact' }
     expect(await restoreFromAudit(item, store)).toBeUndefined()
+  })
+})
+
+describe('LLM review window', () => {
+  it('collectAutoExtracted skips records reviewed within the 4h window', async () => {
+    const { store, workspace } = await makeStore()
+    // Fresh auto record (never reviewed) → collected.
+    await store.create('project', { text: 'never reviewed' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
+    // Auto record reviewed 1h ago → skipped (inside window).
+    const recent = await store.create('project', { text: 'reviewed 1h ago' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
+    await store.touchReviewed(recent.id, workspace, Date.now() - 60 * 60 * 1000)
+    // Auto record reviewed 5h ago → collected (outside window).
+    const old = await store.create('project', { text: 'reviewed 5h ago' }, { kind: 'session', sessionId: 's1', turn: 3 }, workspace)
+    await store.touchReviewed(old.id, workspace, Date.now() - 5 * 60 * 60 * 1000)
+    // Explicit record → never collected.
+    await store.create('project', { text: 'explicit' }, { kind: 'explicit' }, workspace)
+
+    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+    const texts = candidates.map(candidate => candidate.record.text).sort()
+    expect(texts).toEqual(['never reviewed', 'reviewed 5h ago'])
+  })
+
+  it('touchReviewed stamps a record and persists across reads', async () => {
+    const { store, workspace } = await makeStore()
+    const record = await store.create('project', { text: 'stamp me' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
+    const at = Date.now() - 1234
+    expect(await store.touchReviewed(record.id, workspace, at)).toBe(true)
+    const reloaded = await store.get(record.id, workspace)
+    expect(reloaded?.lastReviewedAt).toBe(at)
+    // Missing id is a no-op, not an error.
+    expect(await store.touchReviewed('no-such-id', workspace, at)).toBe(false)
   })
 })

@@ -264,18 +264,29 @@ interface ReviewCandidate {
   readonly workspace: string | undefined
 }
 
-/** Collect every auto-extracted record (user + project layers). */
-async function collectAutoExtracted(
+/** Records reviewed more recently than this are skipped by the LLM pass. */
+const REVIEW_SKIP_WINDOW_MS = 4 * 60 * 60 * 1000
+
+/** How many LLM review batches run concurrently. */
+const REVIEW_CONCURRENCY = 3
+
+/** Collect every auto-extracted record (user + project layers), skipping
+ * records the LLM review already considered within the skip window. */
+export async function collectAutoExtracted(
   store: MemoryStore,
   workspaces: readonly { readonly path: string }[],
+  now = Date.now(),
 ): Promise<ReviewCandidate[]> {
+  const cutoff = now - REVIEW_SKIP_WINDOW_MS
+  const include = (record: MemoryRecord): boolean =>
+    isAutoExtracted(record) && (record.lastReviewedAt === undefined || record.lastReviewedAt < cutoff)
   const candidates: ReviewCandidate[] = []
   for (const record of await store.list('user', undefined)) {
-    if (isAutoExtracted(record)) candidates.push({ record, workspace: undefined })
+    if (include(record)) candidates.push({ record, workspace: undefined })
   }
   for (const workspace of workspaces) {
     for (const record of await store.list('project', workspace.path)) {
-      if (isAutoExtracted(record)) candidates.push({ record, workspace: workspace.path })
+      if (include(record)) candidates.push({ record, workspace: workspace.path })
     }
   }
   return candidates
@@ -584,12 +595,34 @@ export async function runLlmReview(
   }
 
   const outcome: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
-  for (const batch of batches) {
-    // Fail-soft per batch: a model error or malformed reply yields an empty
-    // plan and that batch is simply skipped, never aborting the whole review.
-    const plan = await reviewBatch(apiCtx, batch, signal)
-    if (plan.delete.length === 0 && plan.merge.length === 0) continue
-    outcome.push(...await applyPlan(store, batch, plan, memoryRoot))
+  // Run the model calls concurrently (pure reads + LLM); apply the plans
+  // serially afterwards because merges mutate shared records and must not
+  // race. One failing batch never blanks the whole review.
+  const reviewedIds = new Set<string>()
+  for (let index = 0; index < batches.length; index += REVIEW_CONCURRENCY) {
+    const slice = batches.slice(index, index + REVIEW_CONCURRENCY)
+    const plans = await Promise.all(slice.map(batch => reviewBatch(apiCtx, batch, signal)))
+    for (let b = 0; b < slice.length; b += 1) {
+      const batch = slice[b]!
+      const plan = plans[b]!
+      for (const candidate of batch) reviewedIds.add(candidate.record.id)
+      if (plan.delete.length === 0 && plan.merge.length === 0) continue
+      outcome.push(...await applyPlan(store, batch, plan, memoryRoot))
+    }
+  }
+  // Stamp every reviewed record (kept or removed) so the next maintain run
+  // skips it within the review window. Removed records are gone already;
+  // stamping only the survivors matters, but stamping all is harmless.
+  const now = Date.now()
+  for (const candidate of batches.flat()) {
+    if (reviewedIds.has(candidate.record.id)) {
+      await store.touchReviewed(candidate.record.id, candidate.workspace, now).catch(() => {})
+    }
+  }
+  // Merged records were freshly created without a review stamp; mark them so
+  // the next run does not re-review the consolidation it just produced.
+  for (const affected of outcome) {
+    await store.touchReviewed(affected.id, affected.workspace, now).catch(() => {})
   }
   return outcome
 }

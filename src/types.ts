@@ -35,6 +35,10 @@ export interface MemoryRecord {
   readonly accessCount: number
   /** Unix epoch milliseconds of the last recall hit, for LRU eviction. */
   readonly lastAccessedAt?: number
+  /** Unix epoch milliseconds when the LLM review last considered this record.
+   * Absent means never reviewed; the review skips records reviewed within the
+   * recent window so repeated maintain runs do not re-analyze the same facts. */
+  readonly lastReviewedAt?: number
 }
 
 /** Input for creating or updating one record. */

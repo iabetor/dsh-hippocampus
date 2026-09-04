@@ -217,6 +217,25 @@ export class MemoryStore {
   }
 
   /**
+   * Stamp a record as reviewed by the LLM maintenance pass.
+   * Updates `lastReviewedAt` in place when the record exists; no-op otherwise.
+   * @param id - the record id.
+   * @param workspace - workspace for project-layer records (undefined = user layer).
+   * @param at - review timestamp in epoch ms; defaults to now.
+   */
+  async touchReviewed(id: string, workspace?: string, at: number = Date.now()): Promise<boolean> {
+    const roots = this.rootsFor(workspace)
+    for (const scope of ['project', 'user'] as const) {
+      const path = recordPath(recordsDir(roots, scope), id)
+      const record = await readRecordFile(path)
+      if (record === undefined) continue
+      await this.writeAtomic(roots, scope, { ...record, lastReviewedAt: at })
+      return true
+    }
+    return false
+  }
+
+  /**
    * Delete one record across the user layer and every known workspace root.
    * Used when the executing session's workspace cannot be resolved: a record
    * must never be "unknown" merely because it lives in a different project.
