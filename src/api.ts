@@ -245,6 +245,7 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
     return lines.join('\n')
   }
   const runBackgroundMaintain = async (taskId: string): Promise<void> => {
+    const startedAt = Date.now()
     try {
       broadcast({ type: 'maintain/start', taskId })
       const registry = ctx.workspaceRegistry?.list() ?? []
@@ -254,39 +255,60 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
       // appended entries evict older ones, so the length no longer grows.
       const before = await readAudit(memoryRoot)
       const beforeNewest = before[0]?.time ?? 0
+      const rulesStartedAt = Date.now()
       const ruleRemoved = await runRuleSweep(store, registry, memoryRoot)
+      const rulesMs = Date.now() - rulesStartedAt
+      const llmStartedAt = Date.now()
       const llmAffected = await runLlmReview(ctx, store, registry, memoryRoot)
+      const llmMs = Date.now() - llmStartedAt
+      const totalMs = Date.now() - startedAt
       const after = await readAudit(memoryRoot)
       const freshAudit = after.filter(entry => entry.time > beforeNewest)
       const removed = ruleRemoved + llmAffected.length
+      const timing = { totalMs, rulesMs, llmMs }
       broadcast({
         type: 'maintain/done',
         taskId,
         removed,
         audit: freshAudit,
+        timing,
       })
       await notifyThalamus({
         kind: removed > 0 ? 'success' : 'info',
         title: removed > 0 ? '记忆整理完成' : '记忆整理完成（无需清理）',
-        detail: removed > 0 ? `清理 ${removed} 条记录` : '未发现需要清理的记录',
-        previewText: auditPreview(freshAudit),
+        detail: removed > 0
+          ? `清理 ${removed} 条记录 · 用时 ${fmtMs(totalMs)}`
+          : `未发现需要清理的记录 · 用时 ${fmtMs(totalMs)}`,
+        previewText: `${auditPreview(freshAudit)}\n\n⏱ 规则扫描 ${fmtMs(rulesMs)} · LLM 审查 ${fmtMs(llmMs)} · 总计 ${fmtMs(totalMs)}`,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const totalMs = Date.now() - startedAt
       broadcast({
         type: 'maintain/error',
         taskId,
         message,
+        timing: { totalMs },
       })
       await notifyThalamus({
         kind: 'error',
         title: '记忆整理失败',
-        detail: message,
-        previewText: `## 记忆整理失败\n\n${message}`,
+        detail: `${message} · 用时 ${fmtMs(totalMs)}`,
+        previewText: `## 记忆整理失败\n\n${message}\n\n⏱ 用时 ${fmtMs(totalMs)}`,
       })
     } finally {
       maintainRunning = false
     }
+  }
+  /** Format milliseconds as a compact human duration (e.g. 1m 23s / 4.2s / 350ms). */
+  const fmtMs = (ms: number): string => {
+    if (ms >= 60_000) {
+      const m = Math.floor(ms / 60_000)
+      const s = Math.round((ms % 60_000) / 1000)
+      return s > 0 ? `${m}m ${s}s` : `${m}m`
+    }
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+    return `${ms}ms`
   }
   const startMaintain = (taskId: string): boolean => {
     if (maintainRunning) return false
