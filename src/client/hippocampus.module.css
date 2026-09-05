@@ -180,12 +180,7 @@
   overflow: hidden;
   background: transparent;
   border-left: 3px solid transparent;
-  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(127, 127, 127, 0.12));
   transition: background 120ms ease;
-}
-
-.recordRow:last-child {
-  border-bottom: none;
 }
 
 .recordRow:hover {
