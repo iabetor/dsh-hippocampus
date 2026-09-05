@@ -62,16 +62,18 @@
 }
 
 /* Cap each column's width so wide tabs (e.g. ultra-wide screens) don't
-   leave the text swimming in whitespace; the row wraps when there is
-   no horizontal room left. */
+   leave the text swimming in whitespace. flex-grow stays 0 so the
+   column doesn't stretch into the empty space; flex-wrap lets the row
+   break to a single column when there is no horizontal room left. */
 .columnsRow {
   flex-wrap: wrap;
   justify-content: flex-start;
 }
 
 .columnsRow .column {
+  flex: 0 1 380px;
   max-width: 420px;
-  flex: 1 1 320px;
+  min-width: 280px;
 }
 
 /* Layout-direction toggle in the legend row. */
