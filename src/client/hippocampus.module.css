@@ -61,6 +61,19 @@
   padding-right: 4px;
 }
 
+/* Cap each column's width so wide tabs (e.g. ultra-wide screens) don't
+   leave the text swimming in whitespace; the row wraps when there is
+   no horizontal room left. */
+.columnsRow {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.columnsRow .column {
+  max-width: 420px;
+  flex: 1 1 320px;
+}
+
 /* Layout-direction toggle in the legend row. */
 .layoutToggle {
   margin-left: auto;
@@ -177,7 +190,7 @@
 .recordBody {
   flex: 1;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .recordHead {
@@ -189,13 +202,13 @@
 
 .recordText {
   font-size: 13px;
+  line-height: 1.45;
   color: var(--dsw-alias-label-primary, currentColor);
-  overflow: hidden;
-  text-overflow: ellipsis;
   overflow-wrap: anywhere;
   word-break: break-word;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   min-width: 0;
 }
