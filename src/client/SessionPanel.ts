@@ -133,14 +133,14 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
     // capped and project memory follows below.
     h('div', { className: `${css.columns} ${direction === 'row' ? css.columnsRow : css.columnsColumn}` },
       // Recent recalls: what the model actually used in this session.
-      h('div', { className: `${css.section} ${css.column}` },
+      h('div', { className: css.section },
         h('div', { className: css.sectionTitle },
           t('session.recent'),
           totalRecallCount > 0 && h('span', { className: css.sectionCount }, String(totalRecallCount)),
         ),
         recalls.length === 0
           ? h('div', { className: css.emptyHint }, t('session.noRecalls'))
-          : h('div', { className: `${css.recallList} ${css.columnList}` },
+          : h('div', { className: css.recallList },
             recalls.map(item => h(RecordRow, {
               key: item.id, record: item, t, bar: 'recall',
               meta: { count: item.recallCount, lastAt: item.lastRecalledAt },
@@ -149,14 +149,14 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
       ),
       // Project memory: the workspace's own facts, side by side with recalls.
       // (User-scope memory lives in the Settings page, not here.)
-      h('div', { className: `${css.section} ${css.column}` },
+      h('div', { className: css.section },
         h('div', { className: css.sectionTitle },
           t('session.project'),
           project.length > 0 && h('span', { className: css.sectionCount }, String(project.length)),
         ),
         project.length === 0
           ? h('div', { className: css.emptyHint }, t('session.empty'))
-          : h('div', { className: `${css.projectList} ${css.columnList}` },
+          : h('div', { className: css.projectList },
             project.map(record => h(RecordRow, { key: record.id, record, t, bar: 'project' })),
           ),
       ),
