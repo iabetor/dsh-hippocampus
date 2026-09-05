@@ -12,6 +12,12 @@ import type { MemoryRecallView, MemoryRecordView } from './api.ts'
 import { fetchRecalls, listRecords } from './api.ts'
 import css from './hippocampus.module.css'
 
+/** localStorage key for the layout direction preference. */
+const LAYOUT_KEY = 'dsh-hippocampus.panel-direction'
+
+// Minimal DOM faces (no DOM lib in the host tsconfig).
+declare const localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void }
+
 /** Props injected by the conversation.view slot. */
 export interface SessionPanelInjected {
   sessionId: string
@@ -58,6 +64,19 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
   const [project, setProject] = useState<MemoryRecordView[] | null>(null)
   const [recalls, setRecalls] = useState<MemoryRecallView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Layout direction: 'row' = side by side (wide), 'column' = stacked
+  // (narrow). Persisted per browser so the choice survives reloads.
+  const [direction, setDirection] = useState<'row' | 'column'>(() => {
+    const stored = (typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_KEY) : null)
+    return stored === 'column' ? 'column' : 'row'
+  })
+  const toggleDirection = (): void => {
+    setDirection(previous => {
+      const next = previous === 'row' ? 'column' : 'row'
+      if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_KEY, next)
+      return next
+    })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -88,7 +107,8 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
   const totalRecallCount = recalls.reduce((sum, item) => sum + item.recallCount, 0)
 
   return h('div', { ...root },
-    // Legend: explains the two left-bar colors at a glance.
+    // Legend: explains the two left-bar colors at a glance; the layout
+    // toggle on the right switches between side-by-side and stacked.
     h('div', { className: css.legend },
       h('span', { className: css.legendItem },
         h('i', { className: `${css.legendSwatch} ${css.legendRecall}` }),
@@ -98,10 +118,20 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
         h('i', { className: `${css.legendSwatch} ${css.legendProject}` }),
         t('session.project'),
       ),
+      h('button', {
+        type: 'button',
+        className: css.layoutToggle,
+        onClick: toggleDirection,
+        title: direction === 'row' ? t('session.stack') : t('session.columns'),
+        'aria-label': direction === 'row' ? t('session.stack') : t('session.columns'),
+      },
+        direction === 'row' ? '⇅' : '⇄',
+      ),
     ),
-    // Two columns side by side: recent recalls and project memory each get
-    // their own scrollable list, so neither pushes the other off the panel.
-    h('div', { className: css.columns },
+    // Two sections: row = side by side, column = stacked. In row mode each
+    // list scrolls independently; in column mode the recall list stays
+    // capped and project memory follows below.
+    h('div', { className: `${css.columns} ${direction === 'row' ? css.columnsRow : css.columnsColumn}` },
       // Recent recalls: what the model actually used in this session.
       h('div', { className: `${css.section} ${css.column}` },
         h('div', { className: css.sectionTitle },

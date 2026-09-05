@@ -33,11 +33,19 @@
 
 /* ---- Sections ---- */
 
-/* Two-column layout: recent recalls and project memory side by side. */
+/* Two-section layout: 'row' = side by side, 'column' = stacked. */
 .columns {
   display: flex;
-  align-items: flex-start;
   gap: 16px;
+}
+
+.columnsRow {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.columnsColumn {
+  flex-direction: column;
 }
 
 .column {
@@ -45,11 +53,31 @@
   min-width: 0;
 }
 
-/* Each column's list scrolls independently so neither pushes the other. */
-.columnList {
+/* In row mode each column's list scrolls independently so neither pushes
+   the other off the panel; column mode leaves the natural flow. */
+.columnsRow .columnList {
   max-height: 46vh;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+/* Layout-direction toggle in the legend row. */
+.layoutToggle {
+  margin-left: auto;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(127, 127, 127, 0.18));
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #999);
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.layoutToggle:hover {
+  color: var(--dsw-alias-label-primary, currentColor);
+  border-color: var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.35));
 }
 
 .section {
@@ -96,6 +124,7 @@
 
 .legend {
   display: flex;
+  align-items: center;
   gap: 16px;
   margin-bottom: 12px;
   padding-left: 2px;
