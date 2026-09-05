@@ -192,6 +192,9 @@
   background: transparent;
   border-left: 4px solid transparent;
   margin-bottom: 6px;
+  /* flex: none — never shrink inside the flex-column list, so each row
+     keeps its natural content height and the list overflows + scrolls. */
+  flex: none;
   transition: background 120ms ease;
 }
 
