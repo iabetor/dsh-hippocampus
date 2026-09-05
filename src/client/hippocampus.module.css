@@ -189,12 +189,20 @@
   border-radius: 6px;
   overflow: hidden;
   background: transparent;
-  border-left: 3px solid transparent;
+  border-left: 4px solid transparent;
+  margin-bottom: 6px;
   transition: background 120ms ease;
 }
 
-.recordRow:hover {
-  background: var(--dsw-alias-fill-subtle, rgba(127, 127, 127, 0.08));
+/* Row hover: tint with the row's own color bar so recall vs project stay
+   distinguishable (a single neutral hover would let adjacent rows from
+   different columns look like one). */
+.barRecall:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-info-primary, #4da3ff) 12%, transparent);
+}
+
+.barProject:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #4caf7d) 12%, transparent);
 }
 
 /* Left color bar: recall = info blue, project = success green. */
@@ -204,7 +212,7 @@
 .recordBody {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 10px 14px;
 }
 
 .recordHead {
