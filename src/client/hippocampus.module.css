@@ -33,6 +33,25 @@
 
 /* ---- Sections ---- */
 
+/* Two-column layout: recent recalls and project memory side by side. */
+.columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.column {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Each column's list scrolls independently so neither pushes the other. */
+.columnList {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .section {
   flex-shrink: 0;
   margin-bottom: 16px;
