@@ -24,15 +24,12 @@
   background: var(--dsw-alias-bg-layer-1, #1e1e1e);
 }
 
-/* Row mode: the panel pins to the viewArea (grid fill), the legend stays
-   on top, and the two columns below each scroll independently. Grid is
-   used instead of nested flex because a single `grid-template-rows: 1fr`
-   + `min-height: 0` reliably makes a grid child's overflow-y:auto produce
-   a scrollbar — the flex equivalent kept leaking content past the clip. */
+/* Row mode: no internal scrolling, no clipping. Both columns render at
+   natural height side by side; the conversation scrollport (above) scrolls
+   the whole panel. This is simpler and avoids the flex/overflow chains
+   that broke (content leaking past per-section overflow:hidden). */
 .rootRow {
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  overflow: visible;
 }
 
 .rootColumn {
@@ -40,32 +37,23 @@
 }
 
 .rootRow .columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr;
-  gap: 20px;
-  min-height: 0;
-  align-items: stretch;
+  /* Two equal halves; no height constraint — let them grow with content. */
+  align-items: flex-start;
 }
 
 .rootRow .section {
+  flex: 1 1 0;
   min-width: 0;
-  min-height: 0;
   margin-bottom: 0;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  overflow: hidden;
 }
 
 .rootRow .sectionTitle {
-  /* title row (auto) */
+  flex: none;
 }
 
 .rootRow .recallList,
 .rootRow .projectList {
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;
+  /* No overflow / max-height: natural flow, the parent scrollport scrolls. */
 }
 
 /* Hide the DSH composer seat while this view is active — the memory view is
