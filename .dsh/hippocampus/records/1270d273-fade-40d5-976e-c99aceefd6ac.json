@@ -1,0 +1,14 @@
+{
+  "id": "1270d273-fade-40d5-976e-c99aceefd6ac",
+  "text": "dsh-hippocampus is a DeepSeek Harness memory plugin providing durable cross-session facts with layered project/user storage and remember/recall/forget tools; version 0.1.0.",
+  "scope": "project",
+  "tags": [],
+  "source": {
+    "kind": "session",
+    "sessionId": "session-165a8b0e-0a20-4295-8f6b-dad958549a88",
+    "turn": 1
+  },
+  "createdAt": 1788566161177,
+  "updatedAt": 1788566161177,
+  "accessCount": 0
+}

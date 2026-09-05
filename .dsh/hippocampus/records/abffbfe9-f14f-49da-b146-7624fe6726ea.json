@@ -1,0 +1,14 @@
+{
+  "id": "abffbfe9-f14f-49da-b146-7624fe6726ea",
+  "text": "Plugin rides only public harness interfaces (ctx.tools, ctx.systemPrompt, ctx.on('session/event'), ctx.llm, ctx.inject); zero modification of deepseek-harness source, bundle, or gate.",
+  "scope": "project",
+  "tags": [],
+  "source": {
+    "kind": "session",
+    "sessionId": "session-165a8b0e-0a20-4295-8f6b-dad958549a88",
+    "turn": 1
+  },
+  "createdAt": 1788566161231,
+  "updatedAt": 1788566161231,
+  "accessCount": 0
+}

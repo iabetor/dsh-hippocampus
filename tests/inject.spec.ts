@@ -18,6 +18,7 @@ function stubAgent(rawId: string, workspace: string): Agent {
     id: SessionId(rawId),
     createdAt: Date.now(),
     cwd: workspace,
+    isSeeded: false,
   })
   const status: AgentStatus = 'running'
   const agent: Agent = {

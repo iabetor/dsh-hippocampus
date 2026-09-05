@@ -1,0 +1,14 @@
+{
+  "id": "e6a5678b-57cf-40aa-a162-36005b5b5a06",
+  "text": "Build/test: pnpm run build (tsdown, typechecks and bundles to lib/) and pnpm run test (vitest); package manager is pnpm@11.9.0.",
+  "scope": "project",
+  "tags": [],
+  "source": {
+    "kind": "session",
+    "sessionId": "session-165a8b0e-0a20-4295-8f6b-dad958549a88",
+    "turn": 1
+  },
+  "createdAt": 1788566161199,
+  "updatedAt": 1788566161199,
+  "accessCount": 0
+}
