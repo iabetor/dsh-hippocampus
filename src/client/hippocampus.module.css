@@ -13,7 +13,7 @@
   color: var(--dsw-alias-label-primary, currentColor);
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   height: 100%;
   overflow-y: auto;
@@ -38,16 +38,17 @@
 }
 
 .rootRow .columns {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  align-content: stretch;
 }
 
 .rootRow .section {
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
   margin-bottom: 0;
+  overflow: hidden;
 }
 
 .rootRow .sectionTitle {
@@ -56,7 +57,7 @@
 
 .rootRow .recallList,
 .rootRow .projectList {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   padding-right: 6px;
@@ -71,22 +72,22 @@
 
 /* ---- Sections ---- */
 
-/* Two-section container. Row mode = two equal full-height halves that fill
-   the panel, each list scrolling independently; column mode = natural
-   stacked flow where the panel root scrolls. */
+/* Two-section container (mirrors dsh-turn-probe's body/list pattern).
+   Row mode: flex row — each section is an equal half that fills the
+   panel height; its list scrolls independently (see .rootRow rules).
+   Column mode: flex column — natural stacked flow, the root scrolls. */
 .columns {
-  display: grid;
+  display: flex;
   gap: 20px;
 }
 
 .columnsRow {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  flex-direction: row;
   align-items: stretch;
 }
 
 .columnsColumn {
-  grid-template-columns: 1fr;
+  flex-direction: column;
 }
 
 /* Layout-direction toggle in the legend row. */
