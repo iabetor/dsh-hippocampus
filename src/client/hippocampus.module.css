@@ -24,13 +24,15 @@
   background: var(--dsw-alias-bg-layer-1, #1e1e1e);
 }
 
-/* Row mode: the harness viewArea has `overflow:hidden` (composer-overlay
-   rule), so root must scroll *itself* inside that bounded box — not rely on
-   the scrollport above (which the hidden viewArea severs). `overflow-y:auto`
-   on root + `height:100%` (= viewArea's bounded height) makes root the
-   scroll container. */
+/* Row mode: root does NOT scroll itself (overflow:hidden) — instead the
+   two columns below each scroll independently. The height chain:
+   root (height:100% from viewArea, overflow:hidden, flex column)
+   → columns (flex:1, min-height:0, flex row)
+     → section (flex:1, min-height:0, overflow:hidden, flex column)
+       → title (flex:none)
+       → list (flex:1, min-height:0, overflow-y:auto) ← scrolls here */
 .rootRow {
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .rootColumn {
@@ -38,14 +40,19 @@
 }
 
 .rootRow .columns {
-  /* Two equal halves; no height constraint — let them grow with content. */
-  align-items: flex-start;
+  flex: 1 1 0;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .rootRow .section {
   flex: 1 1 0;
   min-width: 0;
+  min-height: 0;
   margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .rootRow .sectionTitle {
@@ -54,7 +61,10 @@
 
 .rootRow .recallList,
 .rootRow .projectList {
-  /* No overflow / max-height: natural flow, the parent scrollport scrolls. */
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 /* Hide the DSH composer seat while this view is active — the memory view is
