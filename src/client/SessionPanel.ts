@@ -94,7 +94,11 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
     return () => { cancelled = true }
   }, [sessionId])
 
-  const root = { className: css.root, 'data-hippocampus-view': '', 'data-conversation-composer-overlay': '' }
+  const root = {
+    className: `${css.root} ${direction === 'row' ? css.rootRow : css.rootColumn}`,
+    'data-hippocampus-view': '',
+    'data-conversation-composer-overlay': '',
+  }
 
   if (error !== null) {
     return h('div', { ...root, style: { color: '#c00' } }, error)

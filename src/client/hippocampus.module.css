@@ -24,6 +24,38 @@
   background: var(--dsw-alias-bg-layer-1, #1e1e1e);
 }
 
+/* Row mode: the panel itself does not scroll — the legend stays pinned and
+   the two columns below fill the remaining height, each scrolling on its
+   own (see .columnsRow). */
+.rootRow {
+  overflow: hidden;
+}
+
+.rootRow .columns {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: stretch;
+}
+
+.rootRow .section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.rootRow .sectionTitle {
+  flex: none;
+}
+
+.rootRow .recallList,
+.rootRow .projectList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
 /* Hide the DSH composer seat while this view is active — the memory view is
    read-only and the composer only belongs over the chat transcript.
    Same technique as dsh-turn-probe's `[data-turn-probe-view]` rule. */
@@ -33,10 +65,9 @@
 
 /* ---- Sections ---- */
 
-/* Two-section container. Row mode = equal halves that always fill the
-   width together (grid, never wraps, never leaves the second section
-   invisible); column mode = natural stacked flow. In both modes the
-   lists render at their natural height — the panel root scrolls. */
+/* Two-section container. Row mode = two equal full-height halves that fill
+   the panel, each list scrolling independently; column mode = natural
+   stacked flow where the panel root scrolls. */
 .columns {
   display: grid;
   gap: 20px;
@@ -44,7 +75,8 @@
 
 .columnsRow {
   grid-template-columns: 1fr 1fr;
-  align-items: start;
+  grid-template-rows: 1fr;
+  align-items: stretch;
 }
 
 .columnsColumn {
