@@ -24,34 +24,27 @@
   background: var(--dsw-alias-bg-layer-1, #1e1e1e);
 }
 
-/* Row mode: the panel itself does not scroll — the legend stays pinned and
-   the two columns below fill the remaining height, each scrolling on its
-   own (see .columnsRow). */
+/* Row mode: no internal scrolling, no clipping. Both columns render at
+   natural height side by side; the conversation scrollport (above) scrolls
+   the whole panel. This is simpler and avoids the flex/overflow chains
+   that broke (content leaking past per-section overflow:hidden). */
 .rootRow {
-  overflow: hidden;
-  flex: 1 1 0;
-  min-height: 0;
-  height: auto;
+  overflow: visible;
 }
 
-/* Column mode: natural stacked flow — the panel root scrolls as one page
-   (the default .root overflow-y: auto stays in effect). */
 .rootColumn {
   overflow-y: auto;
 }
 
 .rootRow .columns {
-  flex: 1 1 0;
-  min-height: 0;
+  /* Two equal halves; no height constraint — let them grow with content. */
+  align-items: flex-start;
 }
 
 .rootRow .section {
   flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  min-width: 0;
   margin-bottom: 0;
-  overflow: hidden;
 }
 
 .rootRow .sectionTitle {
@@ -60,10 +53,7 @@
 
 .rootRow .recallList,
 .rootRow .projectList {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;
+  /* No overflow / max-height: natural flow, the parent scrollport scrolls. */
 }
 
 /* Hide the DSH composer seat while this view is active — the memory view is
