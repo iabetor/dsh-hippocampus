@@ -6,6 +6,9 @@ lib/
 # Test coverage
 coverage/
 
+# Hippocampus runtime data (project memory records)
+.dsh/
+
 # Misc
 *.log
 .DS_Store
