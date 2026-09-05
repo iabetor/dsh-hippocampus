@@ -24,12 +24,13 @@
   background: var(--dsw-alias-bg-layer-1, #1e1e1e);
 }
 
-/* Row mode: no internal scrolling, no clipping. Both columns render at
-   natural height side by side; the conversation scrollport (above) scrolls
-   the whole panel. This is simpler and avoids the flex/overflow chains
-   that broke (content leaking past per-section overflow:hidden). */
+/* Row mode: the harness viewArea has `overflow:hidden` (composer-overlay
+   rule), so root must scroll *itself* inside that bounded box — not rely on
+   the scrollport above (which the hidden viewArea severs). `overflow-y:auto`
+   on root + `height:100%` (= viewArea's bounded height) makes root the
+   scroll container. */
 .rootRow {
-  overflow: visible;
+  overflow-y: auto;
 }
 
 .rootColumn {
