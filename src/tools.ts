@@ -143,6 +143,7 @@ const PROMPT_TEXT =
   + '\n   - pointer (index to docs/source) → keep while the target exists, forget when stale or the source is obvious;'
   + '\n   then:'
   + '\n   - duplicate of another record → keep the clearest one, forget the rest;'
+  + '\n   - CONTRADICTS another record (same topic, opposite/outdated claim — e.g. an old preference the user has since changed): keep only the NEWEST one (by createdAt/updatedAt), forget the older ones. A stale memory contradicting the current state would mislead future sessions, so resolve contradictions in favor of the most recent record;'
   + '\n   - transient/one-off/outdated (task state, solved questions, superseded facts) → forget;'
   + '\n   - technical behavior answered by source → forget (the source is authoritative);'
   + '\n   - cross-project preference or the user explicitly stated it → keep.'
