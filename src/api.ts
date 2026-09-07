@@ -233,11 +233,14 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
       lines.push('')
       if (Array.isArray(e.removed)) {
         for (const item of e.removed) {
-          const r = item as { scope?: unknown; text?: unknown }
+          const r = item as { scope?: unknown; text?: unknown; kind?: unknown }
           if (r === null || typeof r !== 'object') continue
           const scope = r.scope === 'user' ? '全局' : '项目'
+          const kindLabel = r.kind === 'preference' ? '偏好'
+            : r.kind === 'convention' ? '约定'
+            : r.kind === 'pointer' ? '指针' : undefined
           const text = typeof r.text === 'string' ? r.text : ''
-          lines.push(`- [${scope}] ${text}`)
+          lines.push(`- [${scope}${kindLabel === undefined ? '' : ` · ${kindLabel}`}] ${text}`)
         }
       }
       lines.push('')

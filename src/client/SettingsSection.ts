@@ -210,7 +210,14 @@ export function SettingsSection({ sessionId, workspace, t }: SettingsSectionInje
             h('div', { className: css.auditReason }, entry.reason),
             entry.removed.length > 0 && h('div', { className: css.auditRemoved },
               ...entry.removed.map(item => h('div', { key: item.id, className: css.auditRemovedItem },
-                h('span', { className: css.auditRemovedText }, item.text),
+                h('span', { className: css.auditRemovedText },
+                  item.kind !== undefined
+                    && h('span', {
+                      className: `${css.kindBadge} ${item.kind === 'preference' ? css.kindPreference : item.kind === 'convention' ? css.kindConvention : css.kindPointer}`,
+                    },
+                    item.kind === 'preference' ? t('kind.preference') : item.kind === 'convention' ? t('kind.convention') : t('kind.pointer')),
+                  item.text,
+                ),
                 h('button', {
                   type: 'button',
                   className: css.restoreBtn,

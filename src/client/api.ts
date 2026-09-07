@@ -124,6 +124,7 @@ export interface MemoryAuditEntry {
     workspace?: string
     text: string
     tags?: readonly string[]
+    kind?: 'preference' | 'convention' | 'pointer'
   }[]
 }
 

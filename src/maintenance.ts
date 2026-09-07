@@ -57,6 +57,8 @@ export interface AuditRemovedRecord {
   readonly workspace?: string
   readonly text: string
   readonly tags?: readonly string[]
+  /** Knowledge kind (preference/convention/pointer) when known. */
+  readonly kind?: import('./types.ts').MemoryKind
 }
 
 /** Record one manual deletion in the audit trail (settings delete / forget). */
@@ -75,6 +77,7 @@ export async function auditManualDelete(
       ...workspace === undefined ? {} : { workspace },
       text: record.text.slice(0, 120),
       ...record.tags.length === 0 ? {} : { tags: [...record.tags] },
+      ...record.kind === undefined ? {} : { kind: record.kind },
     }],
   }, memoryRoot)
 }
@@ -234,7 +237,7 @@ export async function runRuleSweep(
   const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
   // User layer (host-global).
   for (const record of await sweepStale(store, 'user', undefined, now)) {
-    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, 120) })
+    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, 120), ...record.kind === undefined ? {} : { kind: record.kind } })
   }
   // Each workspace's project layer.
   for (const workspace of workspaces) {
@@ -244,6 +247,7 @@ export async function runRuleSweep(
         scope: record.scope,
         workspace: workspace.path,
         text: record.text.slice(0, 120),
+        ...record.kind === undefined ? {} : { kind: record.kind },
       })
     }
   }
@@ -532,6 +536,7 @@ async function applyPlan(
         scope: candidate.record.scope,
         ...candidate.workspace === undefined ? {} : { workspace: candidate.workspace },
         text: candidate.record.text.slice(0, 120),
+        ...candidate.record.kind === undefined ? {} : { kind: candidate.record.kind },
       })
     }
   }
