@@ -247,6 +247,33 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
     }
     return lines.join('\n')
   }
+  /** Count removed records by kind across the fresh audit entries. */
+  const kindCounts = (audit: unknown): { preference: number; convention: number; pointer: number; other: number } => {
+    const counts = { preference: 0, convention: 0, pointer: 0, other: 0 }
+    if (!Array.isArray(audit)) return counts
+    for (const entry of audit) {
+      const e = entry as { removed?: unknown }
+      if (e === null || typeof e !== 'object' || !Array.isArray(e.removed)) continue
+      for (const item of e.removed) {
+        const r = item as { kind?: unknown }
+        const kind = r?.kind
+        if (kind === 'preference' || kind === 'convention' || kind === 'pointer') counts[kind] += 1
+        else counts.other += 1
+      }
+    }
+    return counts
+  }
+  /** Format kind counts as a zh label ('2 指针 · 1 约定'). */
+  const kindSummary = (audit: unknown): string => {
+    const c = kindCounts(audit)
+    const parts: string[] = []
+    if (c.preference > 0) parts.push(`${c.preference} 偏好`)
+    if (c.convention > 0) parts.push(`${c.convention} 约定`)
+    if (c.pointer > 0) parts.push(`${c.pointer} 指针`)
+    if (c.other > 0) parts.push(`${c.other} 其他`)
+    return parts.join(' · ')
+  }
+
   const runBackgroundMaintain = async (taskId: string): Promise<void> => {
     const startedAt = Date.now()
     try {
@@ -273,6 +300,7 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
         type: 'maintain/done',
         taskId,
         removed,
+        summary: kindSummary(freshAudit),
         audit: freshAudit,
         timing,
       })
@@ -280,7 +308,7 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
         kind: removed > 0 ? 'success' : 'info',
         title: removed > 0 ? '记忆整理完成' : '记忆整理完成（无需清理）',
         detail: removed > 0
-          ? `清理 ${removed} 条记录 · 用时 ${fmtMs(totalMs)}`
+          ? `清理 ${removed} 条（${kindSummary(freshAudit)}）· 用时 ${fmtMs(totalMs)}`
           : `未发现需要清理的记录 · 用时 ${fmtMs(totalMs)}`,
         previewText: `${auditPreview(freshAudit)}\n\n⏱ 规则扫描 ${fmtMs(rulesMs)} · LLM 审查 ${fmtMs(llmMs)} · 总计 ${fmtMs(totalMs)}`,
       })
