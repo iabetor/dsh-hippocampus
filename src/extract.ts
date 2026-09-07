@@ -33,8 +33,8 @@ export interface ExtractedFact {
   readonly tags?: readonly string[]
   /**
    * 'fact' (default) → merge into the memory store.
-   * 'note' → a decision/lesson candidate that belongs in an Agent Note,
-   * NOT in memory; callers surface it (e.g. suggest writing a note).
+   * 'note' → a decision/lesson fragment the model may still emit; it is
+   * never stored (decisions are not memory material) — mergeFacts drops it.
    */
   readonly kind?: 'fact' | 'note'
 }
@@ -74,7 +74,7 @@ export function parseExtractedFacts(text: string): ExtractedFact[] {
       const label = scopeMatch[1]!
       const rest = scopeMatch[2]!.trim()
       if (label === 'note') {
-        // Decision/lesson candidates belong in an Agent Note, not memory.
+        // Decisions/lessons are not memory material; tagged so mergeFacts drops them.
         facts.push({ text: rest, kind: 'note' })
       } else {
         facts.push({ text: rest, scope: label as MemoryScope })
@@ -191,11 +191,11 @@ const EXTRACTION_INSTRUCTION = [
   'You are a memory curator for an AI coding assistant. From the conversation above, extract only what belongs in durable memory.',
   '',
   'Be CONSERVATIVE. Remember is for facts the source code cannot answer and that matter across sessions:',
-  '- [project] — a convention or decision the user explicitly confirmed for this project, a stable identifier/path the user named, or a pointer ("X is implemented in src/y.ts").',
+  '- [project] — a convention or rule the user explicitly confirmed for this project, a stable identifier/path the user named, or a pointer ("X is implemented in src/y.ts").',
   '- [user] — a personal preference/habit true across projects (language, tools, workflow).',
-  '- [note] — a design decision, lesson, or pitfall (the "why", what was given up, a bug root cause). These do NOT go into memory; they belong in an Agent Note document, so list them separately for the host to surface.',
   '',
-  'Do NOT extract (the source or transcript already answers these):',
+  'Do NOT extract:',
+  '- Design decisions, lessons, or pitfalls (the "why", what was given up, a bug root cause) — not memory material; leave them to the conversation or the user.',
   '- Technical behavior/API facts that source code documents ("X has no service Y", "Z returns W").',
   '- Answers to one-off questions, transient task state, current progress.',
   '- Content already present in the conversation transcript.',
@@ -206,11 +206,10 @@ const EXTRACTION_INSTRUCTION = [
   `${FACTS_OPEN_TAG}`,
   '- [project] <one-sentence fact>',
   '- [user] <one-sentence fact>',
-  '- [note] <one-sentence decision/lesson>',
   `${FACTS_CLOSE_TAG}`,
   '',
   'Rules:',
-  '- One item per line, each prefixed with "- " and a [project]/[user]/[note] label.',
+  '- One item per line, each prefixed with "- " and a [project]/[user] label.',
   '- Write concise English or the user\'s language; preserve exact identifiers and values.',
   '- When in doubt, extract NOTHING. An empty frame is better than noise.',
   '- If nothing is worth remembering, output the empty frame:',
@@ -354,14 +353,12 @@ export function registerAutoExtract(
         turn,
         detail: `facts=${facts.length} notes=${notes.length} workspace=${workspace ?? ''}`,
       })
-      // Note-kind items (decisions/lessons) belong in an Agent Note, not in
-      // memory. Surface them to the session as a gentle suggestion instead
-      // of silently dropping them.
+      // Note-kind fragments (decisions/lessons) are dropped, not stored:
+      // memory holds preferences/conventions/pointers only.
       for (const note of notes) {
-        ctx.logger?.info?.('hippocampus note candidate (write an Agent Note, not memory): %s', note.text)
         void traceExtract({
           time: Date.now(),
-          kind: 'note-candidate',
+          kind: 'note-dropped',
           sessionId: sessionId(session),
           turn,
           detail: note.text.slice(0, 200),
