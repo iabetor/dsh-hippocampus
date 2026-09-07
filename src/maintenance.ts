@@ -19,6 +19,7 @@ import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
+import { inferKind } from './types.ts'
 import type { MemoryRecord, MemoryScope } from './types.ts'
 import type { MemoryStore } from './store.ts'
 
@@ -77,7 +78,7 @@ export async function auditManualDelete(
       ...workspace === undefined ? {} : { workspace },
       text: record.text.slice(0, 120),
       ...record.tags.length === 0 ? {} : { tags: [...record.tags] },
-      ...record.kind === undefined ? {} : { kind: record.kind },
+      kind: record.kind ?? inferKind(record.scope, record.text),
     }],
   }, memoryRoot)
 }
@@ -234,10 +235,10 @@ export async function runRuleSweep(
   memoryRoot?: string,
   now = Date.now(),
 ): Promise<number> {
-  const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
+  const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string; kind?: import('./types.ts').MemoryKind }> = []
   // User layer (host-global).
   for (const record of await sweepStale(store, 'user', undefined, now)) {
-    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, 120), ...record.kind === undefined ? {} : { kind: record.kind } })
+    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, 120), kind: record.kind ?? inferKind(record.scope, record.text) })
   }
   // Each workspace's project layer.
   for (const workspace of workspaces) {
@@ -247,7 +248,7 @@ export async function runRuleSweep(
         scope: record.scope,
         workspace: workspace.path,
         text: record.text.slice(0, 120),
-        ...record.kind === undefined ? {} : { kind: record.kind },
+        kind: record.kind ?? inferKind(record.scope, record.text),
       })
     }
   }
@@ -525,7 +526,7 @@ async function applyPlan(
 
   // ---- Deletes: drop transient/obsolete/trivial records, excluding any id
   // already consumed by a merge.
-  const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
+  const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string; kind?: import('./types.ts').MemoryKind }> = []
   for (const candidate of candidates) {
     if (mergedIds.has(candidate.record.id)) continue
     if (!plan.delete.includes(candidate.record.id)) continue
@@ -536,7 +537,7 @@ async function applyPlan(
         scope: candidate.record.scope,
         ...candidate.workspace === undefined ? {} : { workspace: candidate.workspace },
         text: candidate.record.text.slice(0, 120),
-        ...candidate.record.kind === undefined ? {} : { kind: candidate.record.kind },
+        kind: candidate.record.kind ?? inferKind(candidate.record.scope, candidate.record.text),
       })
     }
   }
