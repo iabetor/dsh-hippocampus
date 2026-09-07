@@ -210,7 +210,7 @@ const EXTRACTION_INSTRUCTION = [
   '',
   'Rules:',
   '- One item per line, each prefixed with "- " and a [project]/[user] label.',
-  '- Write concise English or the user\'s language; preserve exact identifiers and values.',
+  '- Write every fact in Simplified Chinese (the user reads memory records; English long-form is not acceptable), preserving exact identifiers and values (commands, paths, API names, UI labels) in their original English form.',
   '- When in doubt, extract NOTHING. An empty frame is better than noise.',
   '- If nothing is worth remembering, output the empty frame:',
   `${FACTS_OPEN_TAG}`,
