@@ -121,8 +121,18 @@ const PROMPT_TEXT =
   'Use remember to store facts the user asks you to keep, and recall to retrieve relevant '
   + 'remembered facts before answering. Memory is durable across sessions and restarts and '
   + 'layered: project facts live with the workspace, user facts follow the user. Prefer recall '
-  + 'over guessing when a remembered preference or decision could matter. Use forget only when '
+  + 'over guessing when a remembered preference could matter. Use forget only when '
   + 'the user explicitly asks to remove a fact.'
+  + '\n\n'
+  + 'Knowledge routing — when you notice something that might be worth keeping, decide its home:'
+  + '\n1. If source code or an existing document already answers it, do NOT remember it — read the source when needed.'
+  + '\n2. If it is a design decision, a lesson, or a pitfall (the "why", what was given up), do NOT remember it — write an Agent Note (e.g. .agents/notes/implemented/{class}/YYYY-MM-DD-topic.md) or suggest one to the user.'
+  + '\n3. If it is a build/run/operation procedure, do NOT remember it — put it in the project README.'
+  + '\n4. If it is a cross-project personal preference, habit, or convention the user explicitly stated, remember it (scope user).'
+  + '\n5. If it is current progress or a to-do, do NOT remember it — commits/issues carry it.'
+  + '\n6. If the user explicitly says "remember this", remember it regardless.'
+  + '\nOnly cases 4 and 6 call remember; everything else lives in code or documents.'
+  + '\nA remembered fact may be a short pointer ("X is implemented in src/y.ts") instead of a full technical description — prefer pointers over restating what the source says.'
 
 /** Register the three memory tools and their guidance section. */
 export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore, memoryRoot?: string): void {
@@ -136,10 +146,13 @@ export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore
 
   ctx.tools.register(defineTool({
     name: 'remember',
-    description: 'Store one fact in durable cross-session memory when the user asks you to remember it, '
-      + 'or when a preference, decision, or project fact is likely to matter in future sessions.',
+    description: 'Store one fact in durable cross-session memory. Use it only for (a) facts the user explicitly '
+      + 'asks you to remember, or (b) cross-project personal preferences/habits/conventions the user stated. '
+      + 'Do NOT use it for technical behavior that source code documents (read the source instead), '
+      + 'design decisions/lessons (write an Agent Note instead), procedures (README), or progress (commits). '
+      + 'Prefer a short pointer over restating source.',
     parameters: {
-      text: { type: 'string', required: true, description: 'The fact to remember, one sentence or a short paragraph.' },
+      text: { type: 'string', required: true, description: 'The fact to remember: one sentence, or a short pointer to where the authoritative detail lives.' },
       scope: { type: 'string', enum: ['project', 'user'], description: 'project is workspace-local (default); user is host-global.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Optional free-form tags for retrieval.' },
     },
