@@ -139,3 +139,23 @@ describe('MemoryStore', () => {
     expect(await store.recallsFor('sess-2', workspace)).toHaveLength(0)
   })
 })
+
+describe('kind inference', () => {
+  it('assigns preference to user scope', async () => {
+    const { store, workspace } = await makeStore()
+    const rec = await store.create('user', { text: 'Prefers Chinese replies' }, { kind: 'explicit' }, workspace)
+    expect(rec.kind).toBe('preference')
+  })
+
+  it('assigns pointer to project records with path hints', async () => {
+    const { store, workspace } = await makeStore()
+    const rec = await store.create('project', { text: 'ctx.fs behavior: see dsh-fs source' }, { kind: 'explicit' }, workspace)
+    expect(rec.kind).toBe('pointer')
+  })
+
+  it('assigns convention to plain project records', async () => {
+    const { store, workspace } = await makeStore()
+    const rec = await store.create('project', { text: 'This repo uses pnpm workspaces' }, { kind: 'explicit' }, workspace)
+    expect(rec.kind).toBe('convention')
+  })
+})

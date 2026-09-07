@@ -9,6 +9,18 @@
 /** Where a memory record lives: project is workspace-local, user is host-global. */
 export type MemoryScope = 'project' | 'user'
 
+/**
+ * What kind of knowledge a record carries. Drives UI badges, curation
+ * routing, and cleanup policy (see docs/hippocampus-scope-decision.md):
+ * - preference: cross-project personal fact — durable, never auto-deleted.
+ * - convention: project rule/约定 reused across sessions — durable but may
+ *   age; rule sweep may remove it after long disuse.
+ * - pointer: a short index to the authoritative home (docs/notes/source) —
+ *   most likely to be superseded; safest to auto-clean.
+ * Absent on legacy records; callers may infer it from scope/text.
+ */
+export type MemoryKind = 'preference' | 'convention' | 'pointer'
+
 /** How a record was created. */
 export type MemorySource =
   | { readonly kind: 'explicit' }
@@ -23,6 +35,8 @@ export interface MemoryRecord {
   readonly text: string
   /** project is workspace-local; user is host-global. */
   readonly scope: MemoryScope
+  /** Knowledge kind; absent on legacy records (infer from scope/text). */
+  readonly kind?: MemoryKind
   /** Optional free-form tags for retrieval and grouping. */
   readonly tags: string[]
   /** How the record was created. */
@@ -45,8 +59,22 @@ export interface MemoryRecord {
 export interface MemoryInput {
   /** The fact text. */
   readonly text: string
+  /** Knowledge kind; callers may leave it unset for inference. */
+  readonly kind?: MemoryKind
   /** Optional free-form tags. */
   readonly tags?: readonly string[]
+}
+
+/**
+ * Infer a record's knowledge kind when none is stored (legacy records).
+ * user scope → preference (cross-project personal). project scope with a
+ * pointer-ish shape (path, "see/in/docs/at/src") → pointer; otherwise
+ * convention. Best-effort; UI/curation may override by editing the record.
+ */
+export function inferKind(scope: MemoryScope, text: string): MemoryKind {
+  if (scope === 'user') return 'preference'
+  if (/see |见 |lives (in|at)|is at |docs\//.test(text)) return 'pointer'
+  return 'convention'
 }
 
 /** A recall hit: the stored record plus its relevance score in [0, 1]. */

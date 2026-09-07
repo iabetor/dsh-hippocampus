@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, writeFile, appendFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { inferKind } from './types.ts'
 import type { MemoryInput, MemoryRanker, MemoryRecord, MemoryRecallHit, MemoryScope, RecallLogEntry, SessionRecallAggregate } from './types.ts'
 
 /** Resolved storage roots for both layers. */
@@ -159,6 +160,7 @@ export class MemoryStore {
       id: randomUUID(),
       text,
       scope,
+      kind: input.kind ?? inferKind(scope, text),
       tags: [...new Set((input.tags ?? []).map(tag => tag.trim()).filter(tag => tag.length > 0))],
       source,
       createdAt: now,
@@ -189,6 +191,7 @@ export class MemoryStore {
       id,
       text,
       scope,
+      kind: input.kind ?? inferKind(scope, text),
       tags: [...new Set((input.tags ?? []).map(tag => tag.trim()).filter(tag => tag.length > 0))],
       // Restored records are treated as explicit user intent.
       source: { kind: 'explicit' },
