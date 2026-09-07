@@ -141,13 +141,15 @@ const PROMPT_TEXT =
   + 'Do NOT hand-curate with recall/forget loops — one curate call covers every record.'
   + '\n1. Call curate once (no arguments needed; it reviews both scopes and workspaces).'
   + '\n2. Report what it cleaned: how many records were deleted/merged (the tool returns the details).'
-  + '\n3. If the user only wanted one specific record forgotten, use forget — curate is only for whole-memory tidying.'
+  + '\n3. If curate reports conflicts (explicit-vs-explicit memory pairs the model did NOT delete), list both texts to the user '
+  + 'with the model\'s suggested keep/remove and ask which to delete — never auto-delete either side of a conflict.'
+  + '\n4. If the user only wanted one specific record forgotten, use forget — curate is only for whole-memory tidying.'
 
 const CURATE_OUTPUT_SCHEMA = {
   type: 'object' as const,
   additionalProperties: false,
   properties: {
-    affected: {
+    removed: {
       type: 'array',
       required: true,
       items: {
@@ -160,10 +162,28 @@ const CURATE_OUTPUT_SCHEMA = {
         },
       },
     },
+    conflicts: {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          keep: { type: 'string', required: true },
+          remove: { type: 'string', required: true },
+          reason: { type: 'string', required: true },
+          keepText: { type: 'string' },
+          removeText: { type: 'string' },
+        },
+      },
+    },
   },
 } as const
 
-type CurateToolValue = { affected: Array<{ id: string; scope: MemoryScope; text: string }> }
+type CurateToolValue = {
+  removed: Array<{ id: string; scope: MemoryScope; text: string }>
+  conflicts: Array<{ keep: string; remove: string; reason: string; keepText?: string; removeText?: string }>
+}
 
 const CURATE_OUTPUT = {
   schema: CURATE_OUTPUT_SCHEMA,
@@ -295,12 +315,17 @@ export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore
         throw new Error('memory curation is unavailable in this profile (no llm/agentDefaultModel service); run it from the settings page instead')
       }
       const registry = ctx.get?.('workspaceRegistry') as WorkspaceRegistryService | undefined
-      const affected = await runLlmReview({
+      const result = await runLlmReview({
         ...apiCtx,
         agentDefaultModel,
       } as never, store, registry?.list() ?? [], memoryRoot)
       return {
-        affected: affected.map(({ id, scope, text }) => ({ id, scope, text: text.slice(0, 300) })),
+        removed: result.removed.map(({ id, scope, text }) => ({ id, scope, text: text.slice(0, 300) })),
+        conflicts: result.conflicts.map(({ keep, remove, reason, keepText, removeText }) => ({
+          keep, remove, reason,
+          ...(keepText === undefined ? {} : { keepText }),
+          ...(removeText === undefined ? {} : { removeText }),
+        })),
       }
     },
     presentCall: () => ({ card: 'generic', title: 'Curate memory', kind: 'other', rawInput: '' }),

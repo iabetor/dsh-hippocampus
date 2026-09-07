@@ -155,20 +155,26 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
     ctx.inject?.(['llm', 'agentDefaultModel'], (llmCtx) => {
       const curate = async (): Promise<void> => {
         try {
-          const removed = await runLlmReview(llmCtx as never, store, registryOf(), config.memoryRoot)
-          if (removed.length === 0) return
+          const result = await runLlmReview(llmCtx as never, store, registryOf(), config.memoryRoot)
+          const removed = result.removed
+          if (removed.length === 0 && result.conflicts.length === 0) return
           const service = ctx.get?.('notifications') as
             | { push(input: unknown): Promise<unknown> }
             | undefined
           if (service !== undefined) {
+            const conflictNote = result.conflicts.length > 0
+              ? `；另有 ${result.conflicts.length} 组 explicit 记忆冲突待确认`
+              : ''
             await service.push({
               source: 'hippocampus',
               kind: 'info',
               title: '记忆定时整理',
-              detail: `自动清理 ${removed.length} 条过时/重复记忆`,
+              detail: removed.length > 0
+                ? `自动清理 ${removed.length} 条过时/重复记忆${conflictNote}`
+                : `未发现需清理的记忆${conflictNote}`,
               preview: {
                 name: 'memory-cleanup.md',
-                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 100)}`).join('\n')}`,
+                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 100)}`).join('\n')}${conflictNote}`,
                 language: 'md',
               },
             })

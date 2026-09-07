@@ -110,10 +110,10 @@ function entriesOf(audit: unknown): MaintainToastEntry[] | undefined {
 }
 
 function handleEvent(event: MessageEvent): void {
-  let payload: { type?: unknown; removed?: unknown; summary?: unknown; message?: unknown; audit?: unknown } | null = null
+  let payload: { type?: unknown; removed?: unknown; summary?: unknown; message?: unknown; audit?: unknown; conflicts?: unknown } | null = null
   const data = typeof event.data === 'string' ? event.data : ''
   try {
-    payload = JSON.parse(data) as { type?: unknown; removed?: unknown; summary?: unknown; message?: unknown; audit?: unknown }
+    payload = JSON.parse(data) as { type?: unknown; removed?: unknown; summary?: unknown; message?: unknown; audit?: unknown; conflicts?: unknown }
   } catch {
     return // Keep-alive or non-JSON frames are ignored.
   }
@@ -121,10 +121,14 @@ function handleEvent(event: MessageEvent): void {
   if (payload.type === 'maintain/done') {
     const removed = typeof payload.removed === 'number' ? payload.removed : 0
     const summary = typeof payload.summary === 'string' ? payload.summary : undefined
+    const conflicts = Array.isArray(payload.conflicts) ? payload.conflicts.length : 0
     const entries = entriesOf(payload.audit)
+    const conflictNote = conflicts > 0
+      ? (labels === null ? `（另有 ${conflicts} 组 explicit 记忆冲突待你确认）` : ` · ${conflicts} 组 explicit 冲突待确认`)
+      : ''
     const detail = summary !== undefined && summary.length > 0
-      ? `清理 ${removed} 条（${summary}）`
-      : labels === null ? undefined : labels.doneDetail(removed)
+      ? `清理 ${removed} 条（${summary}）${conflictNote}`
+      : (labels === null ? undefined : `${labels.doneDetail(removed)}${conflictNote}`)
     pushToast('done', labels?.doneTitle ?? '记忆整理完成', detail, entries)
   } else if (payload.type === 'maintain/error') {
     const message = typeof payload.message === 'string' ? payload.message : undefined

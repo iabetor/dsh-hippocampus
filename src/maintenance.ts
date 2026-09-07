@@ -326,12 +326,28 @@ export interface MergeProposal {
   readonly tags?: readonly string[]
 }
 
+/** One explicit-vs-explicit conflict the model detected but must NOT auto-resolve. */
+export interface ExplicitConflict {
+  /** Id of the newer/keep record (the user's current intent). */
+  readonly keep: string
+  /** Id of the older/remove candidate (possibly superseded). */
+  readonly remove: string
+  /** Why the model thinks these conflict (one short sentence). */
+  readonly reason: string
+  /** Keep record text; filled by runLlmReview for user-facing reports. */
+  readonly keepText?: string
+  /** Remove record text; filled by runLlmReview for user-facing reports. */
+  readonly removeText?: string
+}
+
 /** The model's full review plan: records to delete, groups to merge. */
 export interface ReviewPlan {
   /** Ids to delete outright (transient / obsolete / trivial). */
   readonly delete: readonly string[]
   /** Groups of records to merge into a single fuller record. */
   readonly merge: readonly MergeProposal[]
+  /** Explicit-record conflicts the model noticed (reported, never auto-deleted). */
+  readonly explicitConflicts: readonly ExplicitConflict[]
 }
 
 /** Parse the model's review plan JSON (`{delete:[], merge:[...]}`). */
@@ -339,11 +355,12 @@ export function parseReviewPlan(text: string): ReviewPlan {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text)
   const body = fenced?.[1] ?? text
   const match = /\{[\s\S]*\}/.exec(body)
-  if (match === null) return { delete: [], merge: [] }
+  if (match === null) return { delete: [], merge: [], explicitConflicts: [] }
   try {
     const parsed = JSON.parse(match[0]) as {
       delete?: unknown
       merge?: unknown
+      explicitConflicts?: unknown
     }
     const del = Array.isArray(parsed.delete)
       ? parsed.delete.filter((id): id is string => typeof id === 'string' && id.length > 0)
@@ -373,9 +390,22 @@ export function parseReviewPlan(text: string): ReviewPlan {
         .filter((item): item is MergeProposal =>
           item.ids.length >= 2 && item.text.length > 0)
     }
-    return { delete: del, merge }
+    let explicitConflicts: ExplicitConflict[] = []
+    if (Array.isArray(parsed.explicitConflicts)) {
+      explicitConflicts = parsed.explicitConflicts
+        .filter((item): item is Record<string, unknown> =>
+          item !== null && typeof item === 'object' && !Array.isArray(item))
+        .map(item => ({
+          keep: typeof item.keep === 'string' ? item.keep : '',
+          remove: typeof item.remove === 'string' ? item.remove : '',
+          reason: typeof item.reason === 'string' ? item.reason.slice(0, 200) : '',
+        }))
+        .filter((item): item is ExplicitConflict =>
+          item.keep.length > 0 && item.remove.length > 0)
+    }
+    return { delete: del, merge, explicitConflicts }
   } catch {
-    return { delete: [], merge: [] }
+    return { delete: [], merge: [], explicitConflicts: [] }
   }
 }
 
@@ -385,7 +415,9 @@ const REVIEW_INSTRUCTION = [
   '',
   'Each record is tagged with its location: [user] for host-global facts, [project:<workspace>] for one workspace\'s facts. Each record is also tagged with its ORIGIN: [explicit] means the user deliberately asked to remember it (or it was stored through an explicit remember call), [auto] means it was automatically extracted from a conversation turn.',
   '',
-  'EXPLICIT RECORDS ARE PROTECTED: an [explicit] record is something the user chose to keep — do NOT delete or merge it away just because it looks stale, verbose, superseded by code/docs, or redundant with an [auto] record. You may only delete an [explicit] record when it is CONTRADICTED by a NEWER [explicit] record about the same topic (the user changed their mind), or when the user has explicitly disowned it in the conversation. When an [explicit] record and an [auto] record say the same thing, keep the [explicit] one and delete the [auto] one. When merging, never fold an [explicit] record into an [auto] record — if they must be unified, keep the [explicit] text verbatim and delete the [auto].',
+  'EXPLICIT RECORDS ARE PROTECTED: an [explicit] record is something the user chose to keep — do NOT delete or merge it away just because it looks stale, verbose, superseded by code/docs, or redundant with an [auto] record. When an [explicit] record and an [auto] record say the same thing, keep the [explicit] one and delete the [auto] one. When merging, never fold an [explicit] record into an [auto] record.',
+  '',
+  'EXPLICIT vs EXPLICIT conflicts: when TWO [explicit] records contradict or duplicate each other, do NOT delete either. Report the pair in "explicitConflicts": {"keep": "<newer-id>", "remove": "<older-id>", "reason": "one short sentence"}. The user decides; never auto-resolve explicit conflicts. (An explicit record the user has explicitly disowned in the conversation may be deleted normally.)',
   '',
   'MEMORY ONLY stores: (a) user preferences, (b) confirmed conventions, (c) SHORT pointers to authoritative homes (source files, docs, repos). Anything that is really implementation detail, a bug post-mortem, a progress/status snapshot, a milestone plan, or a one-off research dump belongs in source code or docs — it must NOT stay in memory, no matter how it is tagged.',
   '',
@@ -414,8 +446,8 @@ const REVIEW_INSTRUCTION = [
   'LENGTH RULE: a single record longer than ~500 chars is almost certainly docs material that leaked into memory — delete it, or replace it with a ≤200-char pointer. Records of 200–500 chars should be rare.',
   '',
   'Respond with ONLY a JSON object, e.g.:',
-  '{"delete":["id-1","id-2"],"merge":[{"ids":["id-3","id-4"],"text":"The merged concise fact..."}]}',
-  'Use empty arrays when nothing qualifies: {"delete":[],"merge":[]}',
+  '{"delete":["id-1","id-2"],"merge":[{"ids":["id-3","id-4"],"text":"The merged concise fact..."}],"explicitConflicts":[{"keep":"id-new","remove":"id-old","reason":"both explicit and say opposite things about X"}]}',
+  'Use empty arrays when nothing qualifies: {"delete":[],"merge":[],"explicitConflicts":[]}',
   '',
 ].join('\n')
 
@@ -437,10 +469,10 @@ async function reviewBatch(
 ): Promise<ReviewPlan> {
   const selection = apiCtx.agentDefaultModel?.currentSelection()
   if (selection === undefined || selection.provider.length === 0 || selection.model.length === 0) {
-    return { delete: [], merge: [] }
+    return { delete: [], merge: [], explicitConflicts: [] }
   }
   const llm = apiCtx.llm
-  if (llm === undefined) return { delete: [], merge: [] }
+  if (llm === undefined) return { delete: [], merge: [], explicitConflicts: [] }
 
   const listing = batch
     .map(candidate => {
@@ -488,7 +520,7 @@ async function reviewBatch(
       .map(block => block.text)
       .join('')
   } catch {
-    return { delete: [], merge: [] }
+    return { delete: [], merge: [], explicitConflicts: [] }
   } finally {
     clearTimeout(timer)
   }
@@ -590,17 +622,25 @@ export async function applyPlan(
  * candidate, but explicit records are protected (see applyPlan). Runs in
  * small per-location batches so each request stays inside the reasoning
  * model's budget, and one failing batch never blanks the whole review.
- * @returns every affected record (deleted or merged-into) for auditing.
+ * @returns removed records (deleted or merged-into, for auditing) plus any
+ * explicit-vs-explicit conflicts the model reported (never auto-resolved).
  */
+export interface LlmReviewResult {
+  /** Records removed (deleted or merged-into), for auditing and notices. */
+  readonly removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }>
+  /** Explicit-vs-explicit conflicts the model spotted; the user must decide. */
+  readonly conflicts: readonly ExplicitConflict[]
+}
+
 export async function runLlmReview(
   ctx: Context,
   store: MemoryStore,
   workspaces: readonly { readonly path: string }[],
   memoryRoot?: string,
   signal?: AbortSignal,
-): Promise<Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }>> {
+): Promise<LlmReviewResult> {
   const candidates = await collectAutoExtracted(store, workspaces)
-  if (candidates.length === 0) return []
+  if (candidates.length === 0) return { removed: [], conflicts: [] }
 
   const apiCtx = ctx as unknown as {
     agentDefaultModel: { currentSelection(): { provider: string; model: string } }
@@ -625,6 +665,7 @@ export async function runLlmReview(
   }
 
   const outcome: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string }> = []
+  const conflicts: ExplicitConflict[] = []
   // Run the model calls concurrently (pure reads + LLM); apply the plans
   // serially afterwards because merges mutate shared records and must not
   // race. One failing batch never blanks the whole review.
@@ -634,9 +675,19 @@ export async function runLlmReview(
     for (let b = 0; b < slice.length; b += 1) {
       const batch = slice[b]!
       const plan = plans[b]!
+      conflicts.push(...plan.explicitConflicts)
       if (plan.delete.length === 0 && plan.merge.length === 0) continue
       outcome.push(...await applyPlan(store, batch, plan, memoryRoot))
     }
   }
-  return outcome
+  // Fill conflict texts from the candidates so user-facing reports (toast /
+  // curate tool) can show both sides without another store lookup.
+  const byId = new Map(candidates.map(candidate => [candidate.record.id, candidate.record]))
+  for (const conflict of conflicts) {
+    const keep = byId.get(conflict.keep)
+    const remove = byId.get(conflict.remove)
+    if (keep !== undefined) (conflict as { keepText?: string }).keepText = keep.text.slice(0, 300)
+    if (remove !== undefined) (conflict as { removeText?: string }).removeText = remove.text.slice(0, 300)
+  }
+  return { removed: outcome, conflicts }
 }

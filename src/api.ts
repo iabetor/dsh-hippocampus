@@ -289,28 +289,38 @@ export function registerMemoryApi(ctx: MemoryApiContext, store: MemoryStore, mem
       const ruleRemoved = await runRuleSweep(store, registry, memoryRoot)
       const rulesMs = Date.now() - rulesStartedAt
       const llmStartedAt = Date.now()
-      const llmAffected = await runLlmReview(ctx, store, registry, memoryRoot)
+      const llmResult = await runLlmReview(ctx, store, registry, memoryRoot)
       const llmMs = Date.now() - llmStartedAt
       const totalMs = Date.now() - startedAt
       const after = await readAudit(memoryRoot)
       const freshAudit = after.filter(entry => entry.time > beforeNewest)
-      const removed = ruleRemoved + llmAffected.length
+      const removed = ruleRemoved + llmResult.removed.length
+      const conflictCount = llmResult.conflicts.length
       const timing = { totalMs, rulesMs, llmMs }
       broadcast({
         type: 'maintain/done',
         taskId,
         removed,
+        conflicts: llmResult.conflicts,
         summary: kindSummary(freshAudit),
         audit: freshAudit,
         timing,
       })
+      const conflictNote = conflictCount > 0
+        ? `\n⚠️ 发现 ${conflictCount} 组 explicit 记忆冲突（未自动删除）`
+        : ''
+      const conflictList = llmResult.conflicts.map(c => {
+        const keepText = typeof c.keepText === 'string' && c.keepText.length > 0 ? c.keepText : '(id ' + c.keep + ')'
+        const removeText = typeof c.removeText === 'string' && c.removeText.length > 0 ? c.removeText : '(id ' + c.remove + ')'
+        return `- 🆕 保留: ${keepText}\n- 🗑 疑似过时: ${removeText}\n  (理由: ${c.reason})`
+      }).join('\n\n')
       await notifyThalamus({
         kind: removed > 0 ? 'success' : 'info',
         title: removed > 0 ? '记忆整理完成' : '记忆整理完成（无需清理）',
         detail: removed > 0
-          ? `清理 ${removed} 条（${kindSummary(freshAudit)}）· 用时 ${fmtMs(totalMs)}`
-          : `未发现需要清理的记录 · 用时 ${fmtMs(totalMs)}`,
-        previewText: `${auditPreview(freshAudit)}\n\n⏱ 规则扫描 ${fmtMs(rulesMs)} · LLM 审查 ${fmtMs(llmMs)} · 总计 ${fmtMs(totalMs)}`,
+          ? `清理 ${removed} 条（${kindSummary(freshAudit)}）· 用时 ${fmtMs(totalMs)}${conflictNote}`
+          : `未发现需要清理的记录 · 用时 ${fmtMs(totalMs)}${conflictNote}`,
+        previewText: `${auditPreview(freshAudit)}${conflictNote}${conflictCount > 0 ? `\n\n${conflictList}\n\n确认后手动删除,或在对话里说「整理记忆」由助手协助` : ''}\n\n⏱ 规则扫描 ${fmtMs(rulesMs)} · LLM 审查 ${fmtMs(llmMs)} · 总计 ${fmtMs(totalMs)}`,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

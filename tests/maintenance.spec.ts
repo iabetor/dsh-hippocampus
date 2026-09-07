@@ -122,8 +122,14 @@ describe('parseReviewPlan', () => {
     expect(plan.merge).toEqual([])
   })
 
+  it('parses explicitConflicts and drops entries without keep/remove ids', () => {
+    const plan = parseReviewPlan('{"delete":[],"merge":[],"explicitConflicts":[{"keep":"k1","remove":"r1","reason":"both say opposite"},{"keep":"","remove":"r2","reason":"bad"}]}')
+    expect(plan.explicitConflicts).toHaveLength(1)
+    expect(plan.explicitConflicts[0]).toEqual({ keep: 'k1', remove: 'r1', reason: 'both say opposite' })
+  })
+
   it('returns an empty plan for malformed output', () => {
-    expect(parseReviewPlan('not json at all')).toEqual({ delete: [], merge: [] })
+    expect(parseReviewPlan('not json at all')).toEqual({ delete: [], merge: [], explicitConflicts: [] })
   })
 })
 
@@ -175,7 +181,7 @@ describe('LLM review coverage', () => {
     const auto = await store.create('project', { text: 'auto junk' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
     const candidates = await collectAutoExtracted(store, [{ path: workspace }])
 
-    const affected = await applyPlan(store, candidates, { delete: [explicit.id, auto.id], merge: [] }, undefined)
+    const affected = await applyPlan(store, candidates, { delete: [explicit.id, auto.id], merge: [], explicitConflicts: [] }, undefined)
 
     // Explicit survives; auto is deleted.
     expect(await store.get(explicit.id, workspace)).toBeDefined()
@@ -192,6 +198,7 @@ describe('LLM review coverage', () => {
     const affected = await applyPlan(store, candidates, {
       delete: [],
       merge: [{ ids: [explicit.id, auto.id], text: 'merged rewrite of both' }],
+      explicitConflicts: [],
     }, undefined)
 
     // No merge happened: both originals survive untouched.
