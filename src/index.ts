@@ -21,7 +21,7 @@ import { registerAutoExtract } from './extract.ts'
 import { registerAutoInject } from './inject.ts'
 import { DEFAULT_EMBEDDING_MODEL, SemanticRanker } from './ranker.ts'
 import { registerMemoryApi, type MemoryApiContext } from './api.ts'
-import { runRuleSweep } from './maintenance.ts'
+import { runLlmReview, runRuleSweep } from './maintenance.ts'
 
 /** Stable Cordis plugin name; must match the cordis.patch.yml row id. */
 export const name = 'dsh-hippocampus'
@@ -126,25 +126,62 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
     registerMemoryApi(apiCtx as MemoryApiContext, store, config.memoryRoot)
   })
 
-  // Maintenance timer: rule-based sweep of stale auto-extracted records,
-  // with an audit trail. Runs every MAINTENANCE_INTERVAL_MS when the timer
-  // service is present (headless profiles may omit it); the manual trigger
-  // rides the settings panel button through the memory API.
+  // Maintenance timers (when the timer service is present; headless may omit):
+  // 1. Rule sweep every 5 minutes — cheap, removes stale auto-extracted
+  //    records never recalled within STALE_DAYS.
+  // 2. Full LLM curation hourly — every record is reviewed by the routed
+  //    model for duplicates/contradictions/transients; deletions are
+  //    audited and pushed to the notification center (thalamus) when mounted.
   const timer = ctx.get?.('timer') as { interval(callback: () => void, delay: number): () => void } | undefined
   if (timer !== undefined) {
-    const sweep = async (): Promise<void> => {
-      const registry = ctx.get?.('workspaceRegistry') as
+    const registryOf = (): readonly { readonly path: string }[] =>
+      (ctx.get?.('workspaceRegistry') as
         | { list(): readonly { readonly path: string }[] }
-        | undefined
-      const workspaces = registry?.list() ?? []
-      await runRuleSweep(store, workspaces, config.memoryRoot)
-    }
-    // Run once shortly after boot, then on the interval.
+        | undefined)?.list() ?? []
     const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+    // 1. Rule sweep (5 min).
+    const sweep = async (): Promise<void> => {
+      await runRuleSweep(store, registryOf(), config.memoryRoot)
+    }
     void (async () => {
       await delay(5_000)
       await sweep()
     })()
     timer.interval(() => { void sweep() }, 5 * 60 * 1000)
+
+    // 2. Full LLM curation (hourly). Waits for the llm services (present in
+    //    profiles with a model route) and the optional notification service.
+    ctx.inject?.(['llm', 'agentDefaultModel'], (llmCtx) => {
+      const curate = async (): Promise<void> => {
+        try {
+          const removed = await runLlmReview(llmCtx as never, store, registryOf(), config.memoryRoot)
+          if (removed.length === 0) return
+          const service = ctx.get?.('notifications') as
+            | { push(input: unknown): Promise<unknown> }
+            | undefined
+          if (service !== undefined) {
+            await service.push({
+              source: 'hippocampus',
+              kind: 'info',
+              title: '记忆定时整理',
+              detail: `自动清理 ${removed.length} 条过时/重复记忆`,
+              preview: {
+                name: 'memory-cleanup.md',
+                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 100)}`).join('\n')}`,
+                language: 'md',
+              },
+            })
+          }
+        } catch (error) {
+          ctx.logger?.warn?.('hippocampus hourly curation failed: %o', error)
+        }
+      }
+      void (async () => {
+        await delay(60_000) // first run one minute after boot, then hourly
+        await curate()
+      })()
+      timer.interval(() => { void curate() }, 60 * 60 * 1000)
+    })
   }
 }

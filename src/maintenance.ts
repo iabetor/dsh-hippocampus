@@ -283,18 +283,18 @@ const REVIEW_CONCURRENCY = 3
 export async function collectAutoExtracted(
   store: MemoryStore,
   workspaces: readonly { readonly path: string }[],
-  now = Date.now(),
+  _now = Date.now(),
 ): Promise<ReviewCandidate[]> {
-  const cutoff = now - REVIEW_SKIP_WINDOW_MS
-  const include = (record: MemoryRecord): boolean =>
-    isAutoExtracted(record) && (record.lastReviewedAt === undefined || record.lastReviewedAt < cutoff)
+  // Full-coverage review: every record (user + project layers) is offered
+  // to the LLM on each run — no review-skip window. The model decides what
+  // to delete/merge, resolving duplicates and contradictions each pass.
   const candidates: ReviewCandidate[] = []
   for (const record of await store.list('user', undefined)) {
-    if (include(record)) candidates.push({ record, workspace: undefined })
+    candidates.push({ record, workspace: undefined })
   }
   for (const workspace of workspaces) {
     for (const record of await store.list('project', workspace.path)) {
-      if (include(record)) candidates.push({ record, workspace: workspace.path })
+      candidates.push({ record, workspace: workspace.path })
     }
   }
   return candidates
@@ -381,13 +381,14 @@ export function parseReviewPlan(text: string): ReviewPlan {
 
 /** The review directive given to the model. */
 const REVIEW_INSTRUCTION = [
-  'You are a memory curator for an AI coding assistant. Below are AUTO-EXTRACTED memory records (id: text) — they were extracted automatically from past conversations, so deleting or merging them is safe and expected.',
+  'You are a memory curator for an AI coding assistant. Below are the CURRENT memory records (id: text) — the durable cross-session notes of this user/workspace. You run on a regular schedule to keep them accurate.',
   '',
   'Each record is tagged with its location: [user] for host-global facts, [project:<workspace>] for one workspace\'s facts.',
   '',
   'DECIDE, per record or per group of records:',
   '',
   '1. DELETE records matching ANY of these categories:',
+  '- Contradicted: two records about the SAME topic say opposite or outdated things (e.g. an old preference the user has since changed). Delete the OLDER one(s) and keep only the newest — a stale memory would mislead future sessions.',
   '- Transient/one-off: "the build showed 3 warnings", "pressed Ctrl+S at 14:32", "checked node version with node -v" — task state, timestamps, one-time events',
   '- Resolved/obsolete: a fix or decision that is already implemented, a superseded plan',
   '- Trivial/vague: fragments that carry no durable meaning on their own',
@@ -402,7 +403,7 @@ const REVIEW_INSTRUCTION = [
   '- Merge only genuinely related records (same theme); do not force unrelated facts together',
   '- The merged text must be a concise, complete statement that preserves every durable fact from the sources (drop only transient detail)',
   '',
-  'KEEP records that capture durable facts: user preferences, project decisions, conventions, architecture, stable identifiers, API/commands worth remembering.',
+  'KEEP records that capture durable facts: user preferences, conventions, stable identifiers, pointers worth remembering.',
   '',
   'Respond with ONLY a JSON object, e.g.:',
   '{"delete":["id-1","id-2"],"merge":[{"ids":["id-3","id-4"],"text":"The merged fuller fact..."}]}',

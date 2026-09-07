@@ -156,23 +156,18 @@ describe('audit restore', () => {
   })
 })
 
-describe('LLM review window', () => {
-  it('collectAutoExtracted skips records reviewed within the 4h window', async () => {
+describe('LLM review coverage', () => {
+  it('collectAutoExtracted offers every record — no skip window, explicit included', async () => {
     const { store, workspace } = await makeStore()
-    // Fresh auto record (never reviewed) → collected.
-    await store.create('project', { text: 'never reviewed' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
-    // Auto record reviewed 1h ago → skipped (inside window).
-    const recent = await store.create('project', { text: 'reviewed 1h ago' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
-    await store.touchReviewed(recent.id, workspace, Date.now() - 60 * 60 * 1000)
-    // Auto record reviewed 5h ago → collected (outside window).
-    const old = await store.create('project', { text: 'reviewed 5h ago' }, { kind: 'session', sessionId: 's1', turn: 3 }, workspace)
-    await store.touchReviewed(old.id, workspace, Date.now() - 5 * 60 * 60 * 1000)
-    // Explicit record → never collected.
-    await store.create('project', { text: 'explicit' }, { kind: 'explicit' }, workspace)
+    await store.create('project', { text: 'auto fact' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
+    const recent = await store.create('project', { text: 'auto reviewed recently' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
+    await store.touchReviewed(recent.id, workspace, Date.now() - 60 * 1000)
+    await store.create('project', { text: 'explicit fact' }, { kind: 'explicit' }, workspace)
 
     const candidates = await collectAutoExtracted(store, [{ path: workspace }])
     const texts = candidates.map(candidate => candidate.record.text).sort()
-    expect(texts).toEqual(['never reviewed', 'reviewed 5h ago'])
+    // Full coverage: never-reviewed, recently-reviewed, and explicit all collected.
+    expect(texts).toEqual(['auto fact', 'auto reviewed recently', 'explicit fact'])
   })
 
   it('touchReviewed stamps a record and persists across reads', async () => {
