@@ -29,6 +29,9 @@ export const STALE_DAYS = 30
 /** Milliseconds in one day. */
 const DAY_MS = 24 * 60 * 60 * 1000
 
+/** Audit text preview cap: how much of a removed record is kept in the trail. */
+const AUDIT_TEXT_LIMIT = 500
+
 /** Maximum audit entries kept on disk; older lines are trimmed away. */
 export const AUDIT_MAX_ENTRIES = 50
 
@@ -76,7 +79,7 @@ export async function auditManualDelete(
       id: record.id,
       scope: record.scope,
       ...workspace === undefined ? {} : { workspace },
-      text: record.text.slice(0, 120),
+      text: record.text.slice(0, AUDIT_TEXT_LIMIT),
       ...record.tags.length === 0 ? {} : { tags: [...record.tags] },
       kind: record.kind ?? inferKind(record.scope, record.text),
     }],
@@ -238,7 +241,7 @@ export async function runRuleSweep(
   const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string; kind?: import('./types.ts').MemoryKind }> = []
   // User layer (host-global).
   for (const record of await sweepStale(store, 'user', undefined, now)) {
-    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, 120), kind: record.kind ?? inferKind(record.scope, record.text) })
+    removed.push({ id: record.id, scope: record.scope, text: record.text.slice(0, AUDIT_TEXT_LIMIT), kind: record.kind ?? inferKind(record.scope, record.text) })
   }
   // Each workspace's project layer.
   for (const workspace of workspaces) {
@@ -247,7 +250,7 @@ export async function runRuleSweep(
         id: record.id,
         scope: record.scope,
         workspace: workspace.path,
-        text: record.text.slice(0, 120),
+        text: record.text.slice(0, AUDIT_TEXT_LIMIT),
         kind: record.kind ?? inferKind(record.scope, record.text),
       })
     }
@@ -520,7 +523,7 @@ async function applyPlan(
       id: created.id,
       scope: firstScope,
       ...firstWorkspace === undefined ? {} : { workspace: firstWorkspace },
-      text: `${proposal.text} [merged from: ${members.map(m => m.record.id).join(', ')}]`.slice(0, 120),
+      text: `${proposal.text} [merged from: ${members.map(m => m.record.id).join(', ')}]`.slice(0, AUDIT_TEXT_LIMIT),
     })
   }
 
@@ -536,7 +539,7 @@ async function applyPlan(
         id: candidate.record.id,
         scope: candidate.record.scope,
         ...candidate.workspace === undefined ? {} : { workspace: candidate.workspace },
-        text: candidate.record.text.slice(0, 120),
+        text: candidate.record.text.slice(0, AUDIT_TEXT_LIMIT),
         kind: candidate.record.kind ?? inferKind(candidate.record.scope, candidate.record.text),
       })
     }
