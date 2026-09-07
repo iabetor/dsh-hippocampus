@@ -11,6 +11,7 @@ export interface MemoryRecordView {
   id: string
   text: string
   scope: 'project' | 'user'
+  kind?: 'preference' | 'convention' | 'pointer'
   tags: string[]
   source: string
   createdAt: number

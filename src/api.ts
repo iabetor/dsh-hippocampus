@@ -520,6 +520,7 @@ function view(record: import('./types.ts').MemoryRecord) {
     id: record.id,
     text: record.text,
     scope: record.scope,
+    kind: record.kind,
     tags: record.tags,
     source: record.source.kind,
     createdAt: record.createdAt,

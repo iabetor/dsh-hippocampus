@@ -48,9 +48,18 @@ function RecordRow({
 }) {
   const now = Date.now()
   const timeLabel = meta === undefined ? '' : relativeTime(meta.lastAt, now)
+  const kindLabel = record.kind === undefined ? undefined
+    : record.kind === 'preference' ? t('kind.preference')
+    : record.kind === 'convention' ? t('kind.convention') : t('kind.pointer')
   return h('div', { className: `${css.recordRow} ${bar === 'recall' ? css.barRecall : css.barProject}` },
     h('div', { className: css.recordBody },
-      h('span', { className: css.recordText }, record.text),
+      h('span', { className: css.recordText },
+        kindLabel !== undefined
+          && h('span', {
+            className: `${css.kindBadge} ${record.kind === 'preference' ? css.kindPreference : record.kind === 'convention' ? css.kindConvention : css.kindPointer}`,
+          }, kindLabel),
+        record.text,
+      ),
       meta !== undefined && h('div', { className: css.recordMeta },
         h('span', null, `${t('session.recalled', { count: meta.count })}`),
         timeLabel !== '' && h('span', { className: css.metaTime }, timeLabel),

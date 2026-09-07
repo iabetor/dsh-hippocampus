@@ -38,6 +38,9 @@ export const zh = {
   'toast.doneTitle': '记忆整理完成',
   'toast.doneDetail': '共清理 {count} 条记录（详情见清理记录）',
   'toast.errorTitle': '记忆整理失败',
+  'kind.preference': '偏好',
+  'kind.convention': '约定',
+  'kind.pointer': '指针',
   'common.scopeProject': '项目',
   'common.scopeUser': '全局',
 } satisfies Record<string, string>
@@ -78,6 +81,9 @@ export const en: Record<string, string> = {
   'toast.doneTitle': 'Memory tidy complete',
   'toast.doneDetail': '{count} record(s) cleaned (see cleanup log for details)',
   'toast.errorTitle': 'Memory tidy failed',
+  'kind.preference': 'Preference',
+  'kind.convention': 'Convention',
+  'kind.pointer': 'Pointer',
   'common.scopeProject': 'Project',
   'common.scopeUser': 'User',
 }

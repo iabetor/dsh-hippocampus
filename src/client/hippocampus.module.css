@@ -181,6 +181,34 @@
 .legendRecall { background: var(--dsw-alias-state-info-primary, #4da3ff); }
 .legendProject { background: var(--dsw-alias-state-success-primary, #4caf7d); }
 
+/* Knowledge-kind badges: preference / convention / pointer. */
+.kindBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  margin-right: 6px;
+  border-radius: 4px;
+  vertical-align: 1px;
+  letter-spacing: 0.02em;
+}
+
+.kindPreference {
+  color: var(--dsw-alias-state-info-primary, #4da3ff);
+  background: color-mix(in srgb, var(--dsw-alias-state-info-primary, #4da3ff) 14%, transparent);
+}
+
+.kindConvention {
+  color: var(--dsw-alias-state-success-primary, #4caf7d);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #4caf7d) 14%, transparent);
+}
+
+.kindPointer {
+  color: var(--dsw-alias-label-secondary, #bbb);
+  background: var(--dsw-alias-fill-subtle, rgba(127, 127, 127, 0.12));
+}
+
 /* ---- Record rows: flat lines with a left type bar (no card chrome) ---- */
 
 .recordRow {

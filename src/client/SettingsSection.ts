@@ -25,11 +25,20 @@ function RecordRow({ record, onDelete, t }: {
   onDelete: (id: string) => void
   t: SettingsSectionInjected['t']
 }) {
+  const kindLabel = record.kind === undefined ? undefined
+    : record.kind === 'preference' ? t('kind.preference')
+    : record.kind === 'convention' ? t('kind.convention') : t('kind.pointer')
   return h('div', {
     className: `${css.settingsRow} ${record.scope === 'user' ? css.settingsRowUser : css.settingsRowProject}`,
   },
     h('div', { className: css.settingsRowBody },
-      h('div', { className: css.settingsRowText }, record.text),
+      h('div', { className: css.settingsRowText },
+        kindLabel !== undefined
+          && h('span', {
+            className: `${css.kindBadge} ${record.kind === 'preference' ? css.kindPreference : record.kind === 'convention' ? css.kindConvention : css.kindPointer}`,
+          }, kindLabel),
+        record.text,
+      ),
     ),
     h('button', {
       type: 'button',
