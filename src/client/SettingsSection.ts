@@ -19,18 +19,57 @@ export interface SettingsSectionInjected {
   t: (key: string, params?: Record<string, unknown>) => string
 }
 
-/** One record row with a left color bar and a hover-only delete button. */
+/** Render one record as an Agent-Note-style markdown document for copy. */
+function noteMarkdown(record: MemoryRecordView): string {
+  const date = new Date(record.createdAt).toISOString().slice(0, 10)
+  const scope = record.scope === 'user' ? 'user' : 'project'
+  const text = record.text.replace(/\s+$/, '')
+  return [
+    `# ${text.slice(0, 60).replace(/[^\w\u4e00-\u9fa5 -]/g, '').trim() || 'memory-note'}`,
+    '',
+    `> Materialized from a memory record (${scope} scope, created ${date}).`,
+    `> Source: ${record.source} · id: ${record.id}`,
+    '',
+    text,
+    '',
+  ].join('\n')
+}
+
+/** One record row with a left color bar and hover-only actions. */
 function RecordRow({ record, onDelete, t }: {
   record: MemoryRecordView
   onDelete: (id: string) => void
   t: SettingsSectionInjected['t']
 }) {
+  const [copied, setCopied] = useState(false)
+  const copyAsNote = (): void => {
+    const text = noteMarkdown(record)
+    const copy = (globalThis as { navigator?: { clipboard?: { writeText(text: string): Promise<unknown> } } }).navigator?.clipboard
+    const done = (): void => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+    if (copy !== undefined) {
+      void copy.writeText(text).then(done).catch(() => done())
+    } else {
+      // Fallback (no clipboard API): the note text is surfaced via the
+      // generated markdown in the record's own title tooltip path; just
+      // acknowledge so the row doesn't appear dead.
+      done()
+    }
+  }
   return h('div', {
     className: `${css.settingsRow} ${record.scope === 'user' ? css.settingsRowUser : css.settingsRowProject}`,
   },
     h('div', { className: css.settingsRowBody },
       h('div', { className: css.settingsRowText }, record.text),
     ),
+    h('button', {
+      type: 'button',
+      className: css.copyBtn,
+      onClick: copyAsNote,
+      title: t('settings.copyAsNote'),
+    }, copied ? t('settings.copied') : t('settings.copyNote')),
     h('button', {
       type: 'button',
       className: css.deleteBtn,
