@@ -272,9 +272,6 @@ interface ReviewCandidate {
   readonly workspace: string | undefined
 }
 
-/** Records reviewed more recently than this are skipped by the LLM pass. */
-const REVIEW_SKIP_WINDOW_MS = 4 * 60 * 60 * 1000
-
 /** How many LLM review batches run concurrently. */
 const REVIEW_CONCURRENCY = 3
 
@@ -614,31 +611,15 @@ export async function runLlmReview(
   // Run the model calls concurrently (pure reads + LLM); apply the plans
   // serially afterwards because merges mutate shared records and must not
   // race. One failing batch never blanks the whole review.
-  const reviewedIds = new Set<string>()
   for (let index = 0; index < batches.length; index += REVIEW_CONCURRENCY) {
     const slice = batches.slice(index, index + REVIEW_CONCURRENCY)
     const plans = await Promise.all(slice.map(batch => reviewBatch(apiCtx, batch, signal)))
     for (let b = 0; b < slice.length; b += 1) {
       const batch = slice[b]!
       const plan = plans[b]!
-      for (const candidate of batch) reviewedIds.add(candidate.record.id)
       if (plan.delete.length === 0 && plan.merge.length === 0) continue
       outcome.push(...await applyPlan(store, batch, plan, memoryRoot))
     }
-  }
-  // Stamp every reviewed record (kept or removed) so the next maintain run
-  // skips it within the review window. Removed records are gone already;
-  // stamping only the survivors matters, but stamping all is harmless.
-  const now = Date.now()
-  for (const candidate of batches.flat()) {
-    if (reviewedIds.has(candidate.record.id)) {
-      await store.touchReviewed(candidate.record.id, candidate.workspace, now).catch(() => {})
-    }
-  }
-  // Merged records were freshly created without a review stamp; mark them so
-  // the next run does not re-review the consolidation it just produced.
-  for (const affected of outcome) {
-    await store.touchReviewed(affected.id, affected.workspace, now).catch(() => {})
   }
   return outcome
 }

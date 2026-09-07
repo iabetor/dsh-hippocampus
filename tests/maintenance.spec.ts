@@ -160,24 +160,12 @@ describe('LLM review coverage', () => {
   it('collectAutoExtracted offers every record — no skip window, explicit included', async () => {
     const { store, workspace } = await makeStore()
     await store.create('project', { text: 'auto fact' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
-    const recent = await store.create('project', { text: 'auto reviewed recently' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
-    await store.touchReviewed(recent.id, workspace, Date.now() - 60 * 1000)
+    await store.create('project', { text: 'auto reviewed recently' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
     await store.create('project', { text: 'explicit fact' }, { kind: 'explicit' }, workspace)
 
     const candidates = await collectAutoExtracted(store, [{ path: workspace }])
     const texts = candidates.map(candidate => candidate.record.text).sort()
     // Full coverage: never-reviewed, recently-reviewed, and explicit all collected.
     expect(texts).toEqual(['auto fact', 'auto reviewed recently', 'explicit fact'])
-  })
-
-  it('touchReviewed stamps a record and persists across reads', async () => {
-    const { store, workspace } = await makeStore()
-    const record = await store.create('project', { text: 'stamp me' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
-    const at = Date.now() - 1234
-    expect(await store.touchReviewed(record.id, workspace, at)).toBe(true)
-    const reloaded = await store.get(record.id, workspace)
-    expect(reloaded?.lastReviewedAt).toBe(at)
-    // Missing id is a no-op, not an error.
-    expect(await store.touchReviewed('no-such-id', workspace, at)).toBe(false)
   })
 })
