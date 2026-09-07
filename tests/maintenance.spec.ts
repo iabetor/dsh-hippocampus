@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MemoryStore } from '../src/store.ts'
 import {
-  AUDIT_MAX_ENTRIES, appendAudit, auditManualDelete, collectAutoExtracted, parseReviewPlan,
+  AUDIT_MAX_ENTRIES, appendAudit, applyPlan, auditManualDelete, collectAutoExtracted, parseReviewPlan,
   parseReviewVerdict, readAudit, restoreFromAudit, runRuleSweep, sweepStale,
 } from '../src/maintenance.ts'
 
@@ -167,5 +167,36 @@ describe('LLM review coverage', () => {
     const texts = candidates.map(candidate => candidate.record.text).sort()
     // Full coverage: never-reviewed, recently-reviewed, and explicit all collected.
     expect(texts).toEqual(['auto fact', 'auto reviewed recently', 'explicit fact'])
+  })
+
+  it('applyPlan never deletes an explicit record even when the model asks', async () => {
+    const { store, workspace } = await makeStore()
+    const explicit = await store.create('project', { text: 'user kept this' }, { kind: 'explicit' }, workspace)
+    const auto = await store.create('project', { text: 'auto junk' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
+    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+
+    const affected = await applyPlan(store, candidates, { delete: [explicit.id, auto.id], merge: [] }, undefined)
+
+    // Explicit survives; auto is deleted.
+    expect(await store.get(explicit.id, workspace)).toBeDefined()
+    expect(await store.get(auto.id, workspace)).toBeUndefined()
+    expect(affected.map(a => a.id)).toEqual([auto.id])
+  })
+
+  it('applyPlan never merges an explicit record into a rewrite', async () => {
+    const { store, workspace } = await makeStore()
+    const explicit = await store.create('project', { text: 'user kept this' }, { kind: 'explicit' }, workspace)
+    const auto = await store.create('project', { text: 'auto fragment' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
+    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+
+    const affected = await applyPlan(store, candidates, {
+      delete: [],
+      merge: [{ ids: [explicit.id, auto.id], text: 'merged rewrite of both' }],
+    }, undefined)
+
+    // No merge happened: both originals survive untouched.
+    expect(await store.get(explicit.id, workspace)).toBeDefined()
+    expect(await store.get(auto.id, workspace)).toBeDefined()
+    expect(affected).toHaveLength(0)
   })
 })

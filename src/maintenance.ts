@@ -3,11 +3,14 @@
  *
  * Rule layer (cheap, runs opportunistically): auto-extracted records
  * (`source: session`) that were never recalled for STALE_DAYS are removed.
- * User-explicit records (`source: explicit`) are NEVER touched automatically.
+ * User-explicit records (`source: explicit`) are never removed by the rules.
  *
- * LLM layer (manual button / future daily): asks the routed model to review
- * auto-extracted records and delete duplicates, stale facts, and trivia.
- * User-explicit records are never candidates.
+ * LLM layer (manual button / hourly timer / in-chat curate): asks the routed
+ * model to review EVERY record (auto and explicit) and delete duplicates,
+ * stale facts, and trivia or merge same-topic fragments. Explicit records
+ * are protected: the listing tags them [explicit], the instruction tells the
+ * model to keep them unless contradicted by a newer explicit record, and
+ * applyPlan hard-skips explicit records in both merge and delete paths.
  *
  * Every removal appends one line to the audit log (user-layer root, shared
  * across workspaces), so the user can verify what was cleaned and why.
@@ -266,8 +269,8 @@ export async function runRuleSweep(
   return removed.length
 }
 
-/** One auto-extracted record offered to the LLM review, with its location. */
-interface ReviewCandidate {
+/** One record offered to the LLM review (auto + explicit), with its location. */
+export interface ReviewCandidate {
   readonly record: MemoryRecord
   readonly workspace: string | undefined
 }
@@ -380,13 +383,15 @@ export function parseReviewPlan(text: string): ReviewPlan {
 const REVIEW_INSTRUCTION = [
   'You are a memory curator for an AI coding assistant. Below are the CURRENT memory records (id: text) — durable cross-session notes of this user/workspace. You run on a regular schedule to keep them accurate and MINIMAL.',
   '',
-  'Each record is tagged with its location: [user] for host-global facts, [project:<workspace>] for one workspace\'s facts.',
+  'Each record is tagged with its location: [user] for host-global facts, [project:<workspace>] for one workspace\'s facts. Each record is also tagged with its ORIGIN: [explicit] means the user deliberately asked to remember it (or it was stored through an explicit remember call), [auto] means it was automatically extracted from a conversation turn.',
+  '',
+  'EXPLICIT RECORDS ARE PROTECTED: an [explicit] record is something the user chose to keep — do NOT delete or merge it away just because it looks stale, verbose, superseded by code/docs, or redundant with an [auto] record. You may only delete an [explicit] record when it is CONTRADICTED by a NEWER [explicit] record about the same topic (the user changed their mind), or when the user has explicitly disowned it in the conversation. When an [explicit] record and an [auto] record say the same thing, keep the [explicit] one and delete the [auto] one. When merging, never fold an [explicit] record into an [auto] record — if they must be unified, keep the [explicit] text verbatim and delete the [auto].',
   '',
   'MEMORY ONLY stores: (a) user preferences, (b) confirmed conventions, (c) SHORT pointers to authoritative homes (source files, docs, repos). Anything that is really implementation detail, a bug post-mortem, a progress/status snapshot, a milestone plan, or a one-off research dump belongs in source code or docs — it must NOT stay in memory, no matter how it is tagged.',
   '',
   'DECIDE, per record or per group of records:',
   '',
-  '1. DELETE records matching ANY of these categories:',
+  '1. DELETE records matching ANY of these categories (subject to the explicit-protection rule above):',
   '- Contradicted: two records about the SAME topic say opposite or outdated things (e.g. an old preference the user has since changed). Delete the OLDER one(s) and keep only the newest — a stale memory would mislead future sessions.',
   '- Superseded project detail: a record describing one project\'s internals or history — architecture dumps, "root cause & fix", layout/status snapshots, milestones/progress, implemented-feature descriptions. Once a project is built, its source and README are authoritative; such a record is obsolete even when it was auto-tagged as a pointer or convention.',
   '- Pointer that restates its target: a record whose body EMBEDS long specifics (roughly >200 chars of implementation detail) instead of merely naming the home. Keep at most a short pointer (repo path / doc path / file); delete the embedded blob.',
@@ -442,7 +447,11 @@ async function reviewBatch(
       const location = candidate.record.scope === 'user'
         ? '[user]'
         : `[project:${candidate.workspace ?? '?'}]`
-      return `${candidate.record.id} ${location}: ${candidate.record.text}`
+      // source 标记:explicit = 用户明确 remember 的,受保护;session/auto = 自动提取。
+      const sourceTag = candidate.record.source.kind === 'explicit'
+        ? '[explicit]'
+        : '[auto]'
+      return `${candidate.record.id} ${sourceTag} ${location}: ${candidate.record.text}`
     })
     .join('\n')
   const messages: Message[] = [
@@ -486,8 +495,9 @@ async function reviewBatch(
   return parseReviewPlan(text)
 }
 
-/** Apply one batch's plan: merges first, then deletes. Returns the outcomes. */
-async function applyPlan(
+/** Apply one batch's plan: merges first, then deletes. Returns the outcomes.
+ * Explicit records are protected: never merged, never deleted here. */
+export async function applyPlan(
   store: MemoryStore,
   candidates: readonly ReviewCandidate[],
   plan: ReviewPlan,
@@ -505,6 +515,10 @@ async function applyPlan(
     // Safety: drop proposals that reference unknown ids, or span multiple
     // scopes/workspaces, or merge a single record into itself.
     if (members.length < 2) continue
+    // Explicit protection: never merge an [explicit] record into anything.
+    // The user deliberately kept it; folding it into a rewrite would lose
+    // their exact wording and provenance.
+    if (members.some(member => member.record.source.kind === 'explicit')) continue
     const firstScope = members[0]!.record.scope
     const firstWorkspace = members[0]!.workspace
     const uniform = members.every(member =>
@@ -532,11 +546,13 @@ async function applyPlan(
   }
 
   // ---- Deletes: drop transient/obsolete/trivial records, excluding any id
-  // already consumed by a merge.
+  // already consumed by a merge. Explicit records are never deleted here —
+  // the user deliberately kept them; only a manual forget removes them.
   const removed: Array<{ id: string; scope: MemoryScope; workspace?: string; text: string; kind?: import('./types.ts').MemoryKind }> = []
   for (const candidate of candidates) {
     if (mergedIds.has(candidate.record.id)) continue
     if (!plan.delete.includes(candidate.record.id)) continue
+    if (candidate.record.source.kind === 'explicit') continue
     const deleted = await store.delete(candidate.record.id, candidate.workspace)
     if (deleted) {
       removed.push({
@@ -553,7 +569,7 @@ async function applyPlan(
     await appendAudit({
       time: Date.now(),
       layer: 'llm',
-      reason: 'model review: duplicates, transient, or trivial auto-extracted records',
+      reason: 'model review: deleted duplicates, transient, or trivial records',
       removed,
     }, memoryRoot)
   }
@@ -561,7 +577,7 @@ async function applyPlan(
     await appendAudit({
       time: Date.now(),
       layer: 'llm',
-      reason: 'model review: merged related auto-extracted records',
+      reason: 'model review: merged related records into a fuller one',
       removed: mergedOutcome,
     }, memoryRoot)
   }
@@ -569,8 +585,9 @@ async function applyPlan(
 }
 
 /**
- * LLM review layer: ask the routed model which auto-extracted records are
- * duplicates/stale/trivial (delete) or same-topic fragments (merge). Runs in
+ * LLM review layer: ask the routed model which records are duplicates/stale/
+ * trivial (delete) or same-topic fragments (merge). Every record is a
+ * candidate, but explicit records are protected (see applyPlan). Runs in
  * small per-location batches so each request stays inside the reasoning
  * model's budget, and one failing batch never blanks the whole review.
  * @returns every affected record (deleted or merged-into) for auditing.
