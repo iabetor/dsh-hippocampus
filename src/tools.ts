@@ -133,6 +133,18 @@ const PROMPT_TEXT =
   + '\n6. If the user explicitly says "remember this", remember it regardless.'
   + '\nOnly cases 4 and 6 call remember; everything else lives in code or documents.'
   + '\nA remembered fact may be a short pointer ("X is implemented in src/y.ts") instead of a full technical description — prefer pointers over restating what the source says.'
+  + '\n\n'
+  + 'Memory curation — when the user asks to tidy/curate/organize memory (e.g. "整理记忆", "清理记忆", "review my memory"), you do the whole job yourself:'
+  + '\n1. Recall everything: call recall with an empty query and a large limit (e.g. query: "", limit: 500) in each scope.'
+  + '\n2. Classify every record against the routing rules above:'
+  + '\n   - duplicate of another record → keep the clearest one, forget the rest;'
+  + '\n   - transient/one-off/outdated (task state, solved questions, superseded facts) → forget;'
+  + '\n   - decision/lesson/pitfall → write an Agent Note with your write tool (path like docs/notes/ or .agents/notes/implemented/), then forget the memory or replace it with a one-line pointer to the note;'
+  + '\n   - procedure → move it into the project README, then forget or leave a pointer;'
+  + '\n   - technical behavior answered by source → forget (source is authoritative);'
+  + '\n   - cross-project preference or the user explicitly stated it → keep.'
+  + '\n3. Report what you did: how many kept/forgotten, notes written, files updated.'
+  + '\n4. Ask before destructive bulk actions only when the user asked for a review, not a cleanup — otherwise just do the cleanup they asked for.'
 
 /** Register the three memory tools and their guidance section. */
 export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore, memoryRoot?: string): void {
