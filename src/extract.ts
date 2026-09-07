@@ -31,6 +31,12 @@ export interface ExtractedFact {
   readonly text: string
   readonly scope?: MemoryScope
   readonly tags?: readonly string[]
+  /**
+   * 'fact' (default) → merge into the memory store.
+   * 'note' → a decision/lesson candidate that belongs in an Agent Note,
+   * NOT in memory; callers surface it (e.g. suggest writing a note).
+   */
+  readonly kind?: 'fact' | 'note'
 }
 
 /**
@@ -62,10 +68,17 @@ export function parseExtractedFacts(text: string): ExtractedFact[] {
     const match = /^\s*-\s+(.+)$/.exec(line)
     const content = match?.[1]?.trim()
     if (content === undefined || content.length === 0) continue
-    // Optional [project] / [user] scope label at the start of the line.
-    const scopeMatch = /^\[(project|user)\]\s+(.+)$/.exec(content)
+    // Scope label at the start: [project] / [user] / [note].
+    const scopeMatch = /^\[(project|user|note)\]\s+(.+)$/.exec(content)
     if (scopeMatch !== null) {
-      facts.push({ text: scopeMatch[2]!.trim(), scope: scopeMatch[1] as MemoryScope })
+      const label = scopeMatch[1]!
+      const rest = scopeMatch[2]!.trim()
+      if (label === 'note') {
+        // Decision/lesson candidates belong in an Agent Note, not memory.
+        facts.push({ text: rest, kind: 'note' })
+      } else {
+        facts.push({ text: rest, scope: label as MemoryScope })
+      }
     } else {
       // Unlabeled facts default to project (the primary retrieval source).
       facts.push({ text: content })
@@ -175,32 +188,43 @@ export async function extractFactsWithLlm(
 
 /** The extraction directive: distills durable facts with scope labels. */
 const EXTRACTION_INSTRUCTION = [
-  'You are a memory curator for an AI coding assistant. From the conversation above, extract facts worth remembering across future sessions.',
+  'You are a memory curator for an AI coding assistant. From the conversation above, extract only what belongs in durable memory.',
   '',
-  'Include only durable, generalizable facts: user preferences, project decisions, conventions, constraints, and stable identifiers.',
-  'Exclude: transient task state, answers to one-off questions, content already present in the conversation transcript, and anything the user explicitly asked to forget.',
+  'Be CONSERVATIVE. Remember is for facts the source code cannot answer and that matter across sessions:',
+  '- [project] — a convention or decision the user explicitly confirmed for this project, a stable identifier/path the user named, or a pointer ("X is implemented in src/y.ts").',
+  '- [user] — a personal preference/habit true across projects (language, tools, workflow).',
+  '- [note] — a design decision, lesson, or pitfall (the "why", what was given up, a bug root cause). These do NOT go into memory; they belong in an Agent Note document, so list them separately for the host to surface.',
   '',
-  'Each fact must be labeled with its scope:',
-  '- [project] — related to the current repository/project: tech stack, architecture decisions, code conventions, project-specific APIs or commands.',
-  '- [user] — about the user personally and true across projects: coding habits, tool preferences, environment setup, communication preferences.',
+  'Do NOT extract (the source or transcript already answers these):',
+  '- Technical behavior/API facts that source code documents ("X has no service Y", "Z returns W").',
+  '- Answers to one-off questions, transient task state, current progress.',
+  '- Content already present in the conversation transcript.',
+  '- Anything the user explicitly asked to forget.',
   '',
   `Output EXACTLY the following structure, between ${FACTS_OPEN_TAG} and ${FACTS_CLOSE_TAG}:`,
   '',
   `${FACTS_OPEN_TAG}`,
   '- [project] <one-sentence fact>',
   '- [user] <one-sentence fact>',
+  '- [note] <one-sentence decision/lesson>',
   `${FACTS_CLOSE_TAG}`,
   '',
   'Rules:',
-  '- One fact per line, each prefixed with "- " and a [project]/[user] label.',
+  '- One item per line, each prefixed with "- " and a [project]/[user]/[note] label.',
   '- Write concise English or the user\'s language; preserve exact identifiers and values.',
+  '- When in doubt, extract NOTHING. An empty frame is better than noise.',
   '- If nothing is worth remembering, output the empty frame:',
   `${FACTS_OPEN_TAG}`,
   `${FACTS_CLOSE_TAG}`,
   '- Do not mention this curation request. Output only the frame.',
 ].join('\n')
 
-/** Merge extracted facts into the store with deduplication. */
+/**
+ * Merge extracted facts into the store with deduplication. Note-kind items
+ * (decision/lesson candidates) are NOT stored — they belong in an Agent
+ * Note document; they are returned so the caller can surface them.
+ * @returns the note-kind items that were skipped.
+ */
 async function mergeFacts(
   store: MemoryStore,
   facts: readonly ExtractedFact[],
@@ -208,9 +232,14 @@ async function mergeFacts(
   turn: number,
   maxFacts: number,
   workspace: string | undefined,
-): Promise<void> {
+): Promise<ExtractedFact[]> {
+  const notes: ExtractedFact[] = []
   let merged = 0
   for (const fact of facts) {
+    if (fact.kind === 'note') {
+      notes.push(fact)
+      continue
+    }
     if (merged >= maxFacts) break
     const scope = fact.scope ?? 'project'
     await store.create(scope, { text: fact.text, tags: fact.tags }, {
@@ -220,6 +249,7 @@ async function mergeFacts(
     }, workspace)
     merged += 1
   }
+  return notes
 }
 
 /** Per-session extraction bookkeeping. */
@@ -316,14 +346,27 @@ export function registerAutoExtract(
       })
       const facts = await extractFactsWithLlm(ctx, config, messages, session, controller.signal)
       const workspace = (session as { header?: { cwd?: string } }).header?.cwd
-      await mergeFacts(store, facts, session.id, turn, config.maxFactsPerTurn, workspace)
+      const notes = await mergeFacts(store, facts, session.id, turn, config.maxFactsPerTurn, workspace)
       void traceExtract({
         time: Date.now(),
         kind: 'merged',
         sessionId: sessionId(session),
         turn,
-        detail: `facts=${facts.length} workspace=${workspace ?? ''}`,
+        detail: `facts=${facts.length} notes=${notes.length} workspace=${workspace ?? ''}`,
       })
+      // Note-kind items (decisions/lessons) belong in an Agent Note, not in
+      // memory. Surface them to the session as a gentle suggestion instead
+      // of silently dropping them.
+      for (const note of notes) {
+        ctx.logger?.info?.('hippocampus note candidate (write an Agent Note, not memory): %s', note.text)
+        void traceExtract({
+          time: Date.now(),
+          kind: 'note-candidate',
+          sessionId: sessionId(session),
+          turn,
+          detail: note.text.slice(0, 200),
+        })
+      }
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) {
         ctx.logger?.warn?.('hippocampus extraction failed: %o', error)

@@ -37,4 +37,15 @@ describe('parseExtractedFacts', () => {
       { text: 'another fact', scope: 'user' },
     ])
   })
+
+  it('parses [note] items as note-kind (not stored in memory)', () => {
+    const facts = parseExtractedFacts(
+      '<memory-facts>\n- [project] pointer: parser lives in src/parse.ts\n- [note] decided against x because y\n- [user] prefers zh replies\n</memory-facts>',
+    )
+    expect(facts).toEqual([
+      { text: 'pointer: parser lives in src/parse.ts', scope: 'project' },
+      { text: 'decided against x because y', kind: 'note' },
+      { text: 'prefers zh replies', scope: 'user' },
+    ])
+  })
 })
