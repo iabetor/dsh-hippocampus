@@ -15,7 +15,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { MemoryRecord, MemoryScope } from './types.ts'
 import type { MemoryStore } from './store.ts'
-import { auditManualDelete } from './maintenance.ts'
+import { auditManualDelete, runLlmReview } from './maintenance.ts'
 
 /** Structural face of the session store: enough to resolve the workspace. */
 interface SessionLike {
@@ -135,20 +135,40 @@ const PROMPT_TEXT =
   + '\n- Long prose or full explanations — keep records to one or two sentences.'
   + '\nWhen in doubt, do not remember.'
   + '\n\n'
-  + 'Memory curation — when the user asks to tidy/curate/organize memory (e.g. "整理记忆", "清理记忆", "review my memory"), you do the whole job yourself:'
-  + '\n1. Recall everything: call recall with an empty query and a large limit (e.g. query: "", limit: 500) in each scope.'
-  + '\n2. Classify every record by its kind (preference / convention / pointer, see the UI badge):'
-  + '\n   - preference (cross-project personal) → keep (user scope);'
-  + '\n   - convention (project rule) → keep while still used, forget when superseded;'
-  + '\n   - pointer (index to docs/source) → keep while the target exists, forget when stale or the source is obvious;'
-  + '\n   then:'
-  + '\n   - duplicate of another record → keep the clearest one, forget the rest;'
-  + '\n   - CONTRADICTS another record (same topic, opposite/outdated claim — e.g. an old preference the user has since changed): keep only the NEWEST one (by createdAt/updatedAt), forget the older ones. A stale memory contradicting the current state would mislead future sessions, so resolve contradictions in favor of the most recent record;'
-  + '\n   - transient/one-off/outdated (task state, solved questions, superseded facts) → forget;'
-  + '\n   - technical behavior answered by source → forget (the source is authoritative);'
-  + '\n   - cross-project preference or the user explicitly stated it → keep.'
-  + '\n3. Report what you did: how many kept and how many forgotten.'
-  + '\n4. Ask before destructive bulk actions only when the user asked for a review, not a cleanup — otherwise just do the cleanup they asked for.'
+  + 'Memory curation — when the user asks to tidy/curate/organize memory (e.g. "整理记忆", "清理记忆", "review my memory"), '
+  + 'call the curate tool. It runs the same model-driven review as the settings "整理" button and the hourly background job: '
+  + 'duplicates are merged, contradictions resolved (keep the newest), transient/obsolete records deleted, with an audit trail. '
+  + 'Do NOT hand-curate with recall/forget loops — one curate call covers every record.'
+  + '\n1. Call curate once (no arguments needed; it reviews both scopes and workspaces).'
+  + '\n2. Report what it cleaned: how many records were deleted/merged (the tool returns the details).'
+  + '\n3. If the user only wanted one specific record forgotten, use forget — curate is only for whole-memory tidying.'
+
+const CURATE_OUTPUT_SCHEMA = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    affected: {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', required: true },
+          scope: { type: 'string', required: true, enum: ['project', 'user'] },
+          text: { type: 'string', required: true },
+        },
+      },
+    },
+  },
+} as const
+
+type CurateToolValue = { affected: Array<{ id: string; scope: MemoryScope; text: string }> }
+
+const CURATE_OUTPUT = {
+  schema: CURATE_OUTPUT_SCHEMA,
+  render: (_args: unknown, value: CurateToolValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
+}
 
 /** Register the three memory tools and their guidance section. */
 export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore, memoryRoot?: string): void {
@@ -245,5 +265,44 @@ export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore
       return { records: [] }
     },
     presentCall: args => ({ card: 'generic', title: 'Forget memory', kind: 'other', rawInput: args.id }),
+  }))
+
+  // Whole-memory curation: same model-driven review as the settings 整理
+  // button and the hourly timer (runLlmReview over every record, both
+  // scopes). Needs the llm + agentDefaultModel services at execute time;
+  // when absent (headless profiles) the model gets a clear error instead of
+  // silently doing nothing.
+  ctx.tools.register(defineTool({
+    name: 'curate',
+    description: 'Tidy the whole memory store: ask the routed model to review every record (user + project) and '
+      + 'merge duplicates, delete contradictions (keeping the newest), transient/obsolete records, and over-long '
+      + 'docs blobs. Every removal is audited (restorable from the settings cleanup log). '
+      + 'Call this when the user asks to 整理记忆 / 清理记忆 / review or tidy memory. '
+      + 'For deleting ONE specific record the user named, prefer forget instead.',
+    parameters: {},
+    output: CURATE_OUTPUT,
+    async execute() {
+      // Services are fetched at execute time (agentDefaultModel registers
+      // later than the tools in some profiles); ctx.get resolves any
+      // registered service regardless of registration order.
+      const apiCtx = ctx as MemoryPluginContext & {
+        llm?: { stream(options: unknown): AsyncIterable<unknown> }
+      }
+      const agentDefaultModel = ctx.get?.('agentDefaultModel') as
+        | { currentSelection(): { provider: string; model: string } }
+        | undefined
+      if (agentDefaultModel === undefined || apiCtx.llm === undefined) {
+        throw new Error('memory curation is unavailable in this profile (no llm/agentDefaultModel service); run it from the settings page instead')
+      }
+      const registry = ctx.get?.('workspaceRegistry') as WorkspaceRegistryService | undefined
+      const affected = await runLlmReview({
+        ...apiCtx,
+        agentDefaultModel,
+      } as never, store, registry?.list() ?? [], memoryRoot)
+      return {
+        affected: affected.map(({ id, scope, text }) => ({ id, scope, text: text.slice(0, 300) })),
+      }
+    },
+    presentCall: () => ({ card: 'generic', title: 'Curate memory', kind: 'other', rawInput: '' }),
   }))
 }
