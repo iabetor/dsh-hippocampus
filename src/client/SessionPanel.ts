@@ -74,10 +74,11 @@ export function SessionPanel({ sessionId, t }: SessionPanelInjected): ReturnType
   const [recalls, setRecalls] = useState<MemoryRecallView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Layout direction: 'row' = side by side (wide), 'column' = stacked
-  // (narrow). Persisted per browser so the choice survives reloads.
+  // (single column, the default now that memory is a small curated set).
+  // Persisted per browser so the choice survives reloads.
   const [direction, setDirection] = useState<'row' | 'column'>(() => {
     const stored = (typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_KEY) : null)
-    return stored === 'column' ? 'column' : 'row'
+    return stored === 'row' ? 'row' : 'column'
   })
   const toggleDirection = (): void => {
     setDirection(previous => {

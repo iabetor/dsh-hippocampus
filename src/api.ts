@@ -9,7 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import type { MemoryScope } from './types.ts'
+import { inferKind, type MemoryScope } from './types.ts'
 import type { MemoryStore } from './store.ts'
 import { runRuleSweep, runLlmReview, readAudit, auditManualDelete, restoreFromAudit, removeAuditRecord } from './maintenance.ts'
 
@@ -520,7 +520,8 @@ function view(record: import('./types.ts').MemoryRecord) {
     id: record.id,
     text: record.text,
     scope: record.scope,
-    kind: record.kind,
+    // Legacy records lack kind on disk; infer for display (not persisted).
+    kind: record.kind ?? inferKind(record.scope, record.text),
     tags: record.tags,
     source: record.source.kind,
     createdAt: record.createdAt,
