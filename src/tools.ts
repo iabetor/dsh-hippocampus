@@ -136,7 +136,11 @@ const PROMPT_TEXT =
   + '\n\n'
   + 'Memory curation — when the user asks to tidy/curate/organize memory (e.g. "整理记忆", "清理记忆", "review my memory"), you do the whole job yourself:'
   + '\n1. Recall everything: call recall with an empty query and a large limit (e.g. query: "", limit: 500) in each scope.'
-  + '\n2. Classify every record against the routing rules above:'
+  + '\n2. Classify every record against the routing rules above. Records may carry a kind — preference / convention / pointer (see the UI badge):'
+  + '\n   - preference (cross-project personal) → keep (user scope);'
+  + '\n   - convention (project rule) → keep while still used, forget when superseded;'
+  + '\n   - pointer (index to docs/source) → keep while the target exists, forget when stale or the source is obvious.'
+  + '\n   Then apply the routing rules:'
   + '\n   - duplicate of another record → keep the clearest one, forget the rest;'
   + '\n   - transient/one-off/outdated (task state, solved questions, superseded facts) → forget;'
   + '\n   - decision/lesson/pitfall → write an Agent Note with your write tool (path like docs/notes/ or .agents/notes/implemented/), then forget the memory or replace it with a one-line pointer to the note;'
@@ -166,13 +170,18 @@ export function registerMemoryTools(ctx: MemoryPluginContext, store: MemoryStore
     parameters: {
       text: { type: 'string', required: true, description: 'The fact to remember: one sentence, or a short pointer to where the authoritative detail lives.' },
       scope: { type: 'string', enum: ['project', 'user'], description: 'project is workspace-local (default); user is host-global.' },
+      kind: { type: 'string', enum: ['preference', 'convention', 'pointer'], description: 'Knowledge kind: preference (cross-project personal), convention (project rule), pointer (index to docs/source). Optional — inferred from scope/text when omitted.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Optional free-form tags for retrieval.' },
     },
     output: MEMORY_OUTPUT,
     async execute(args, exec) {
       const scope = parseScope(args.scope) ?? 'project'
       const workspace = await workspaceOf(ctx, exec)
-      const record = await store.create(scope, { text: args.text, tags: args.tags }, { kind: 'explicit' }, workspace)
+      const record = await store.create(scope, {
+        text: args.text,
+        ...(args.kind === 'preference' || args.kind === 'convention' || args.kind === 'pointer' ? { kind: args.kind } : {}),
+        tags: args.tags,
+      }, { kind: 'explicit' }, workspace)
       return { records: [recordView(record)] }
     },
     presentCall: args => ({ card: 'generic', title: 'Remember fact', kind: 'other', rawInput: args.text }),
