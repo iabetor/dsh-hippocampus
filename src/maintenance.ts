@@ -425,6 +425,7 @@ const REVIEW_INSTRUCTION = [
   '- Superseded project detail: a record describing one project\'s internals or history — architecture dumps, "root cause & fix", layout/status snapshots, milestones/progress, implemented-feature descriptions. Once a project is built, its source and README are authoritative; such a record is obsolete even when it was auto-tagged as a pointer or convention.',
   '- Pointer that restates its target: a record whose body EMBEDS long specifics (roughly >200 chars of implementation detail) instead of merely naming the home. Keep at most a short pointer (repo path / doc path / file); delete the embedded blob.',
   '- Resolved/obsolete: a fix or decision that is already implemented, a superseded plan, an expectation the code now satisfies',
+  '- Re-derivable location/environment facts: "the repo is at <path>", "workspace <path>", tool install locations, current branch, proxy/mirror names — these answer by inspection, recur in every session, and are the most common extract-then-delete cycle. Delete them unless the record ALSO carries a durable convention the path alone does not convey.',
   '- Transient/one-off: "the build showed 3 warnings", "pressed Ctrl+S at 14:32", "checked node version with node -v" — task state, timestamps, one-time events',
   '- Trivial/vague: fragments that carry no durable meaning on their own',
   '- Exact duplicates of another record that will be kept',

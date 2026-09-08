@@ -129,9 +129,10 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
   // Maintenance timers (when the timer service is present; headless may omit):
   // 1. Rule sweep every 5 minutes — cheap, removes stale auto-extracted
   //    records never recalled within STALE_DAYS.
-  // 2. Full LLM curation hourly — every record is reviewed by the routed
-  //    model for duplicates/contradictions/transients; deletions are
+  // 2. Full LLM curation every 4 hours — every record is reviewed by the
+  //    routed model for duplicates/contradictions/transients; deletions are
   //    audited and pushed to the notification center (thalamus) when mounted.
+  //    (4h balances freshness against review noise on a small memory store.)
   const timer = ctx.get?.('timer') as { interval(callback: () => void, delay: number): () => void } | undefined
   if (timer !== undefined) {
     const registryOf = (): readonly { readonly path: string }[] =>
@@ -193,14 +194,14 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
             })
           }
         } catch (error) {
-          ctx.logger?.warn?.('hippocampus hourly curation failed: %o', error)
+          ctx.logger?.warn?.('hippocampus 4h curation failed: %o', error)
         }
       }
       void (async () => {
-        await delay(60_000) // first run one minute after boot, then hourly
+        await delay(60_000) // first run one minute after boot, then every 4 hours
         await curate()
       })()
-      timer.interval(() => { void curate() }, 60 * 60 * 1000)
+      timer.interval(() => { void curate() }, 4 * 60 * 60 * 1000)
     })
   }
 }
