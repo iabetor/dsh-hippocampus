@@ -151,7 +151,7 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
     })()
     timer.interval(() => { void sweep() }, 5 * 60 * 1000)
 
-    // 2. Full LLM curation (hourly). Waits for the llm services (present in
+    // 2. Full LLM curation (every 4h). Waits for the llm services (present in
     //    profiles with a model route) and the optional notification service.
     ctx.inject?.(['llm', 'agentDefaultModel'], (llmCtx) => {
       const curate = async (): Promise<void> => {
