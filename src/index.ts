@@ -163,18 +163,18 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
             | undefined
           if (service !== undefined) {
             const conflictNote = result.conflicts.length > 0
-              ? `；另有 ${result.conflicts.length} 组 explicit 记忆冲突待确认`
+              ? `\n\n⚠️ 另有 ${result.conflicts.length} 组 explicit 记忆冲突待确认（见通知列表，勿自动删除）`
               : ''
             await service.push({
               source: 'hippocampus',
               kind: 'info',
               title: '记忆定时整理',
               detail: removed.length > 0
-                ? `自动清理 ${removed.length} 条过时/重复记忆${conflictNote}`
-                : `未发现需清理的记忆${conflictNote}`,
+                ? `自动清理 ${removed.length} 条过时/重复记忆${result.conflicts.length > 0 ? `；另有 ${result.conflicts.length} 组 explicit 冲突待确认` : ''}`
+                : `未发现需清理的记忆${result.conflicts.length > 0 ? `；另有 ${result.conflicts.length} 组 explicit 冲突待确认` : ''}`,
               preview: {
                 name: 'memory-cleanup.md',
-                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 100)}`).join('\n')}${conflictNote}`,
+                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 500)}`).join('\n')}${conflictNote}`,
                 language: 'md',
               },
             })
