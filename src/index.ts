@@ -155,26 +155,39 @@ export function apply(ctx: Context, config: HippocampusConfig = {}): void {
     ctx.inject?.(['llm', 'agentDefaultModel'], (llmCtx) => {
       const curate = async (): Promise<void> => {
         try {
+          const startedAt = Date.now()
           const result = await runLlmReview(llmCtx as never, store, registryOf(), config.memoryRoot)
+          const totalMs = Date.now() - startedAt
+          const fmtMs = (ms: number): string => {
+            if (ms >= 60_000) {
+              const m = Math.floor(ms / 60_000)
+              const s = Math.round((ms % 60_000) / 1000)
+              return s > 0 ? `${m}m ${s}s` : `${m}m`
+            }
+            if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+            return `${ms}ms`
+          }
           const removed = result.removed
           if (removed.length === 0 && result.conflicts.length === 0) return
           const service = ctx.get?.('notifications') as
             | { push(input: unknown): Promise<unknown> }
             | undefined
           if (service !== undefined) {
-            const conflictNote = result.conflicts.length > 0
-              ? `\n\n⚠️ 另有 ${result.conflicts.length} 组 explicit 记忆冲突待确认（见通知列表，勿自动删除）`
+            const conflictCount = result.conflicts.length
+            const conflictNote = conflictCount > 0
+              ? `\n\n⚠️ 另有 ${conflictCount} 组 explicit 记忆冲突待确认（见通知列表，勿自动删除）`
               : ''
+            const timing = `⏱ LLM 审查 ${fmtMs(totalMs)} · 总计 ${fmtMs(totalMs)}`
             await service.push({
               source: 'hippocampus',
               kind: 'info',
               title: '记忆定时整理',
               detail: removed.length > 0
-                ? `自动清理 ${removed.length} 条过时/重复记忆${result.conflicts.length > 0 ? `；另有 ${result.conflicts.length} 组 explicit 冲突待确认` : ''}`
-                : `未发现需清理的记忆${result.conflicts.length > 0 ? `；另有 ${result.conflicts.length} 组 explicit 冲突待确认` : ''}`,
+                ? `自动清理 ${removed.length} 条过时/重复记忆 · 用时 ${fmtMs(totalMs)}${conflictCount > 0 ? `；另有 ${conflictCount} 组 explicit 冲突待确认` : ''}`
+                : `未发现需清理的记忆 · 用时 ${fmtMs(totalMs)}${conflictCount > 0 ? `；另有 ${conflictCount} 组 explicit 冲突待确认` : ''}`,
               preview: {
                 name: 'memory-cleanup.md',
-                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 500)}`).join('\n')}${conflictNote}`,
+                text: `## 定时整理（自动）\n\n${removed.map((r: { scope: string; text: string }) => `- [${r.scope === 'user' ? '全局' : '项目'}] ${r.text.slice(0, 500)}`).join('\n')}${conflictNote}\n\n${timing}`,
                 language: 'md',
               },
             })
