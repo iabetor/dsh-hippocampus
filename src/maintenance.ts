@@ -278,16 +278,13 @@ export interface ReviewCandidate {
 /** How many LLM review batches run concurrently. */
 const REVIEW_CONCURRENCY = 3
 
-/** Collect every auto-extracted record (user + project layers), skipping
- * records the LLM review already considered within the skip window. */
-export async function collectAutoExtracted(
+/** Collect every record (user + project layers, auto + explicit) as review
+ * candidates — full coverage, no skip window. The model decides what to
+ * delete/merge; explicit records stay protected in applyPlan. */
+export async function collectAll(
   store: MemoryStore,
   workspaces: readonly { readonly path: string }[],
-  _now = Date.now(),
 ): Promise<ReviewCandidate[]> {
-  // Full-coverage review: every record (user + project layers) is offered
-  // to the LLM on each run — no review-skip window. The model decides what
-  // to delete/merge, resolving duplicates and contradictions each pass.
   const candidates: ReviewCandidate[] = []
   for (const record of await store.list('user', undefined)) {
     candidates.push({ record, workspace: undefined })
@@ -639,7 +636,7 @@ export async function runLlmReview(
   memoryRoot?: string,
   signal?: AbortSignal,
 ): Promise<LlmReviewResult> {
-  const candidates = await collectAutoExtracted(store, workspaces)
+  const candidates = await collectAll(store, workspaces)
   if (candidates.length === 0) return { removed: [], conflicts: [] }
 
   const apiCtx = ctx as unknown as {

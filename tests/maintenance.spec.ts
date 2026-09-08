@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MemoryStore } from '../src/store.ts'
 import {
-  AUDIT_MAX_ENTRIES, appendAudit, applyPlan, auditManualDelete, collectAutoExtracted, parseReviewPlan,
+  AUDIT_MAX_ENTRIES, appendAudit, applyPlan, auditManualDelete, collectAll, parseReviewPlan,
   parseReviewVerdict, readAudit, restoreFromAudit, runRuleSweep, sweepStale,
 } from '../src/maintenance.ts'
 
@@ -163,13 +163,13 @@ describe('audit restore', () => {
 })
 
 describe('LLM review coverage', () => {
-  it('collectAutoExtracted offers every record — no skip window, explicit included', async () => {
+  it('collectAll offers every record — no skip window, explicit included', async () => {
     const { store, workspace } = await makeStore()
     await store.create('project', { text: 'auto fact' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
     await store.create('project', { text: 'auto reviewed recently' }, { kind: 'session', sessionId: 's1', turn: 2 }, workspace)
     await store.create('project', { text: 'explicit fact' }, { kind: 'explicit' }, workspace)
 
-    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+    const candidates = await collectAll(store, [{ path: workspace }])
     const texts = candidates.map(candidate => candidate.record.text).sort()
     // Full coverage: never-reviewed, recently-reviewed, and explicit all collected.
     expect(texts).toEqual(['auto fact', 'auto reviewed recently', 'explicit fact'])
@@ -179,7 +179,7 @@ describe('LLM review coverage', () => {
     const { store, workspace } = await makeStore()
     const explicit = await store.create('project', { text: 'user kept this' }, { kind: 'explicit' }, workspace)
     const auto = await store.create('project', { text: 'auto junk' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
-    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+    const candidates = await collectAll(store, [{ path: workspace }])
 
     const affected = await applyPlan(store, candidates, { delete: [explicit.id, auto.id], merge: [], explicitConflicts: [] }, undefined)
 
@@ -193,7 +193,7 @@ describe('LLM review coverage', () => {
     const { store, workspace } = await makeStore()
     const explicit = await store.create('project', { text: 'user kept this' }, { kind: 'explicit' }, workspace)
     const auto = await store.create('project', { text: 'auto fragment' }, { kind: 'session', sessionId: 's1', turn: 1 }, workspace)
-    const candidates = await collectAutoExtracted(store, [{ path: workspace }])
+    const candidates = await collectAll(store, [{ path: workspace }])
 
     const affected = await applyPlan(store, candidates, {
       delete: [],
